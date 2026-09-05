@@ -21,6 +21,7 @@
       </option>
     </select>
     <span class="spacer"></span>
+    <button type="button" class="ghost" @click="exportData" title="导出当前档案全部数据为 JSON 文件">导出 JSON</button>
     <button type="button" class="ghost" @click="openNewProfile">＋新建</button>
     <button type="button" class="ghost" @click="openPinSetup">{{ currentHasPin ? '改 PIN' : '设 PIN' }}</button>
     <button type="button" class="ghost" v-if="currentHasPin && !isLocked" @click="doLock">锁定</button>

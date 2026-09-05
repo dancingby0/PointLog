@@ -7,9 +7,10 @@
 - routes/notes.py    每日感想 API
 - routes/memos.py    备忘录 + 置顶主目标 API
 - routes/profiles.py 本地档案 + PIN 锁 API
+- routes/export.py   数据导出 API
 """
 
-from . import days, entries, memos, notes, pages, profiles
+from . import days, entries, export, memos, notes, pages, profiles
 
 
 def register_blueprints(app):
@@ -19,3 +20,4 @@ def register_blueprints(app):
     app.register_blueprint(notes.bp)
     app.register_blueprint(memos.bp)
     app.register_blueprint(profiles.bp)
+    app.register_blueprint(export.bp)

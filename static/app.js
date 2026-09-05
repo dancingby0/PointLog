@@ -233,6 +233,12 @@ createApp({
       this.dialogError = "";
     },
 
+    // 导出当前档案数据为 JSON 文件
+    exportData() {
+      // 附件下载不会离开当前页
+      window.location.href = "/api/export";
+    },
+
     // 手动立即锁定
     doLock() {
       this.showLock("已锁定，输入 PIN 解锁");
