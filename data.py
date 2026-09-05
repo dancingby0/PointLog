@@ -19,7 +19,8 @@ def default_data() -> dict:
     return {
         "entries": [],       # 打卡记录
         "daily_notes": {},   # 每日感想：{ "YYYY-MM-DD": "文本" }，一天一篇
-        "memos": [],         # 备忘录（含置顶主目标）
+        "memos": [],         # 备忘录：[{ "id": str, "text": str }]
+        "main_goal": "",     # 置顶主目标（v1 仅展示用）
     }
 
 

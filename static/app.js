@@ -58,6 +58,11 @@ createApp({
       form: { content: "", points: 1, category: "", ts: "" },
       noteDraft: "",          // 每日感想编辑框内容（随所选日期切换）
       hasNote: false,         // 所选日期是否已有保存的感想
+      memos: [],              // 备忘录列表
+      memoDraft: "",          // 新增备忘输入框
+      mainGoal: "",           // 置顶主目标
+      goalDraft: "",          // 主目标编辑框
+      goalEditing: false,     // 是否正在编辑主目标
     };
   },
 
@@ -109,6 +114,7 @@ createApp({
       try {
         await this.loadDays();
         await this.loadCalendar();
+        await this.loadMemos();
         // 默认选中今天
         const today = this.days.find((d) => d.is_today);
         await this.selectDay(today ? today.date : this.todayStr);
@@ -336,6 +342,80 @@ createApp({
 
     formatTime(iso) {
       return new Date(iso).toLocaleString("zh-CN", { hour12: false });
+    },
+
+    // ---------- 备忘录 + 主目标 ----------
+
+    // 加载备忘录与主目标
+    async loadMemos() {
+      try {
+        const res = await fetch("/api/memos");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "加载备忘录失败");
+        this.memos = data.memos;
+        this.mainGoal = data.main_goal || "";
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    // 添加一条备忘
+    async addMemo() {
+      const text = this.memoDraft.trim();
+      if (!text) return;
+      try {
+        const res = await fetch("/api/memos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "添加失败");
+        this.memos.push(data);
+        this.memoDraft = "";
+      } catch (err) {
+        alert("添加失败：" + err.message);
+      }
+    },
+
+    // 删除一条备忘
+    async delMemo(id) {
+      try {
+        const res = await fetch(`/api/memos/${id}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "删除失败");
+        this.memos = this.memos.filter((m) => m.id !== id);
+      } catch (err) {
+        alert("删除失败：" + err.message);
+      }
+    },
+
+    // 进入主目标编辑模式
+    startGoalEdit() {
+      this.goalDraft = this.mainGoal;
+      this.goalEditing = true;
+    },
+
+    cancelGoalEdit() {
+      this.goalEditing = false;
+      this.goalDraft = "";
+    },
+
+    // 保存主目标（允许空 = 清除）
+    async saveGoal() {
+      try {
+        const res = await fetch("/api/main-goal", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ goal: this.goalDraft.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "保存失败");
+        this.mainGoal = data.main_goal || "";
+        this.goalEditing = false;
+      } catch (err) {
+        alert("保存失败：" + err.message);
+      }
     },
 
     async del(entry) {

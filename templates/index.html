@@ -15,6 +15,24 @@
     <div class="points">{{ selectedLabel }} 点数 <strong>{{ dayPoints }}</strong></div>
   </section>
 
+  <!-- 置顶主目标（常驻横幅） -->
+  <section class="card goal-card">
+    <template v-if="goalEditing">
+      <input v-model.trim="goalDraft" type="text" maxlength="100"
+             placeholder="写下当前的主目标，如：主攻物理" @keyup.enter="saveGoal">
+      <div class="goal-actions">
+        <button type="button" @click="saveGoal" :disabled="!goalDraft.trim()">保存主目标</button>
+        <button type="button" class="ghost" @click="cancelGoalEdit">取消</button>
+      </div>
+    </template>
+    <template v-else>
+      <span class="goal-icon">🎯</span>
+      <span class="goal-label">{{ mainGoal ? '当前主目标' : '尚未设置主目标' }}</span>
+      <span class="goal-text" v-if="mainGoal">{{ mainGoal }}</span>
+      <button type="button" class="ghost" @click="startGoalEdit" style="margin-left:auto">{{ mainGoal ? '修改' : '设置' }}</button>
+    </template>
+  </section>
+
   <!-- 日期切换器（git log 风格） -->
   <section class="card day-picker">
     <div class="day-picker-head">
@@ -114,6 +132,23 @@
       <button type="button" @click="saveNote">保存感想</button>
       <button type="button" class="ghost" v-if="hasNote || noteDraft.trim()" @click="deleteNote">删除当天感想</button>
     </div>
+  </section>
+
+  <!-- 备忘录（常驻列表） -->
+  <section class="card">
+    <h2>备忘录</h2>
+    <div class="memo-input">
+      <input v-model.trim="memoDraft" type="text" maxlength="200"
+             placeholder="例：周四打扫寝室 / 作业 deadline 是 9月20日" @keyup.enter="addMemo">
+      <button type="button" @click="addMemo">添加</button>
+    </div>
+    <p v-if="memos.length === 0" class="muted">还没有备忘，随手记点什么吧。</p>
+    <ul v-else class="memo-list">
+      <li v-for="m in memos" :key="m.id" class="memo-item">
+        <span class="memo-text">{{ m.text }}</span>
+        <button class="delete" @click="delMemo(m.id)" title="删除">×</button>
+      </li>
+    </ul>
   </section>
 </main>
 <script src="/static/vendor/vue.global.prod.js"></script>
