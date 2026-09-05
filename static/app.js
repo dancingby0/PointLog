@@ -1,34 +1,46 @@
-// PointLog 前端：打卡记录 + 日期切换（M2 · Vue 3）
+// PointLog 前端：打卡记录 + 日期切换 + 贡献日历（M2 · Vue 3）
 const { createApp } = Vue;
+const { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel } = window.PointLogUtils;
 
-// ---------- 日期/时间工具 ----------
-const pad = (n) => String(n).padStart(2, "0");
-
-// Date → 本地时区的 YYYY-MM-DDTHH:MM（<input type=datetime-local>）
-function toLocalInput(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// Date → YYYY-MM-DD
-function toDateStr(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-// "YYYY-MM-DD" → 本地 Date（避免 UTC 解析偏移）
-function fromDateStr(s) {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-// 按凌晨4点规则，ISO 时刻属于哪天
-function dayOf(iso) {
-  const shifted = new Date(new Date(iso).getTime() - 4 * 3600 * 1000);
-  return toDateStr(shifted);
-}
-
-const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-function weekdayLabel(dstr) {
-  return WEEK[fromDateStr(dstr).getDay()];
+// ---------- 贡献日历：把每日数组排成 GitHub 风格热力图网格（周一为每周起点） ----------
+function buildContribGrid(days) {
+  if (!days.length) return { weeks: [], months: [] };
+  const first = fromDateStr(days[0].date);
+  const last = fromDateStr(days[days.length - 1].date);
+  const start = new Date(first);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // 回到所在周周一
+  const map = new Map(days.map((d) => [d.date, d]));
+  const cells = [];
+  let cursor = new Date(start);
+  while (cursor <= last) {
+    const ds = toDateStr(cursor);
+    const hit = map.get(ds);
+    cells.push(
+      hit
+        ? { date: ds, points: hit.points, level: hit.level, inRange: true }
+        : { date: ds, points: 0, level: 0, inRange: false }
+    );
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  const weekCount = Math.ceil(cells.length / 7);
+  const weeks = [];
+  for (let w = 0; w < weekCount; w++) {
+    const col = [];
+    for (let r = 0; r < 7; r++) {
+      col.push(cells[w * 7 + r] || { date: "", points: 0, level: 0, inRange: false });
+    }
+    weeks.push(col);
+  }
+  // 月份标签：每周列里第一个有记录的格子所属月份，变化时才显示
+  const months = [];
+  let prev = "";
+  for (const col of weeks) {
+    const firstCell = col.find((c) => c.inRange && c.date);
+    const m = firstCell ? firstCell.date.slice(0, 7) : "";
+    months.push(m !== prev ? m : "");
+    prev = m;
+  }
+  return { weeks, months };
 }
 
 createApp({
@@ -38,6 +50,7 @@ createApp({
       dayPoints: 0,           // 当前所选天的点数
       selectedDay: "",        // 当前所选日期 YYYY-MM-DD
       days: [],               // 日期切换列表（git log 风格）
+      calendarDays: [],       // 贡献日历原始数据（从最旧到最新）
       jumpTo: "",             // 快速跳转输入
       editingId: null,        // 正在编辑的记录 id；null 表示新增
       form: { content: "", points: 1, category: "", ts: "" },
@@ -63,6 +76,10 @@ createApp({
     selectedIsToday() {
       return this.selectedDay === this.todayStr;
     },
+    // 贡献日历网格（表格化布局）
+    contrib() {
+      return buildContribGrid(this.calendarDays);
+    },
   },
 
   mounted() {
@@ -75,6 +92,7 @@ createApp({
     async init() {
       try {
         await this.loadDays();
+        await this.loadCalendar();
         // 默认选中今天
         const today = this.days.find((d) => d.is_today);
         await this.selectDay(today ? today.date : this.todayStr);
@@ -103,6 +121,20 @@ createApp({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "加载日期失败");
       this.days = data;
+    },
+
+    // 拉取贡献日历数据（近一年每日点数与强度）
+    async loadCalendar() {
+      const res = await fetch("/api/calendar?days=365");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "加载贡献日历失败");
+      this.calendarDays = data;
+    },
+
+    // 贡献日历格子悬浮提示
+    cellTitle(c) {
+      if (!c.inRange) return "";
+      return c.points > 0 ? `${c.date} · ${c.points} 点` : c.date;
     },
 
     async loadEntries() {
@@ -189,9 +221,9 @@ createApp({
       this.form.ts = this.defaultTsFor(this.selectedDay);
     },
 
-    // 刷新记录 + 日期列表（点数会变）
+    // 刷新记录 + 日期列表 + 贡献日历（点数会变）
     async refresh() {
-      await Promise.all([this.loadEntries(), this.loadDays()]);
+      await Promise.all([this.loadEntries(), this.loadDays(), this.loadCalendar()]);
     },
 
     formatTime(iso) {

@@ -36,6 +36,34 @@
     </ul>
   </section>
 
+  <!-- 贡献日历（GitHub 风格热力图） -->
+  <section class="card">
+    <div class="card-head">
+      <h2>贡献日历</h2>
+      <span class="muted">近一年每日点数 · 点击格子跳转到那天</span>
+    </div>
+    <div class="contrib">
+      <div class="contrib-months" :style="{ width: (contrib.weeks.length * 15 - 3) + 'px' }">
+        <template v-for="(m, idx) in contrib.months" :key="idx">
+          <span v-if="m" class="contrib-month" :style="{ left: (idx * 15) + 'px' }">{{ m }}</span>
+        </template>
+      </div>
+      <div class="contrib-row">
+        <div class="contrib-weekdays">
+          <span>一</span><span></span><span>三</span><span></span><span>五</span><span></span><span>日</span>
+        </div>
+        <div class="contrib-grid">
+          <div v-for="(col, wi) in contrib.weeks" :key="wi" class="contrib-col">
+            <div v-for="(c, ri) in col" :key="ri" class="contrib-cell"
+                 :class="{ 'cell-empty': !c.inRange, ['lvl' + c.level]: c.inRange }"
+                 :title="cellTitle(c)"
+                 @click="c.inRange && selectDay(c.date)"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <form class="card" @submit.prevent="submit">
     <h2>{{ editingId ? '编辑打卡' : '新增打卡' }}</h2>
     <label>做什么（一句话）
@@ -70,6 +98,7 @@
   </section>
 </main>
 <script src="/static/vendor/vue.global.prod.js"></script>
+<script src="/static/utils.js"></script>
 <script src="/static/app.js"></script>
 {% endraw %}
 </body>

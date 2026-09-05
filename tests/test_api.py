@@ -10,7 +10,9 @@ import unittest
 from pathlib import Path
 
 import app as app_module
+import config
 import data
+from utils import date_of
 
 
 class DataLayerTest(unittest.TestCase):
@@ -56,14 +58,16 @@ class ApiTest(unittest.TestCase):
         app_module.app.config["TESTING"] = True
         self.client = app_module.app.test_client()
         self._tmp = tempfile.TemporaryDirectory()
-        self._old_dir = app_module.data.DATA_DIR
-        app_module.data.DATA_DIR = Path(self._tmp.name)
+        self._old_dir = data.DATA_DIR
+        data.DATA_DIR = Path(self._tmp.name)
+        self._old_profile = config.CURRENT_PROFILE
         # 每次测试用独立档案，避免相互影响
         self.profile = "api_test"
-        app_module.CURRENT_PROFILE = self.profile
+        config.CURRENT_PROFILE = self.profile
 
     def tearDown(self):
-        app_module.data.DATA_DIR = self._old_dir
+        data.DATA_DIR = self._old_dir
+        config.CURRENT_PROFILE = self._old_profile
         self._tmp.cleanup()
 
     def test_empty_today(self):
@@ -116,7 +120,7 @@ class ApiTest(unittest.TestCase):
     def test_early_morning_2am_belongs_to_previous_day(self):
         """凌晨 2 点（4 点界内）提交，应归属"昨天"。"""
         now = dt.datetime.now().astimezone()
-        today = app_module._date_of(now)          # "今天"（4点界日）
+        today = date_of(now)          # "今天"（4点界日）
         ts = dt.datetime.combine(today, dt.time(2, 0)).astimezone()
         r = self.client.post("/api/entries", json={
             "content": "凌晨学习",
@@ -138,7 +142,7 @@ class ApiTest(unittest.TestCase):
     def test_4am_boundary_belongs_today(self):
         """凌晨 4:00 整正好是"今天"的开端。"""
         now = dt.datetime.now().astimezone()
-        today = app_module._date_of(now)
+        today = date_of(now)
         ts = dt.datetime.combine(today, dt.time(4, 0)).astimezone()
         r = self.client.post("/api/entries", json={
             "content": "4点整学习",
@@ -154,7 +158,7 @@ class ApiTest(unittest.TestCase):
     def test_days_overview(self):
         """/api/days 返回最近若干天的每日点数归总。"""
         now = dt.datetime.now().astimezone()
-        today = app_module._date_of(now)
+        today = date_of(now)
         yesterday = today - dt.timedelta(days=1)
         self.client.post("/api/entries", json={
             "content": "今天的活",
@@ -177,7 +181,7 @@ class ApiTest(unittest.TestCase):
     def test_entries_by_day_param(self):
         """?day=YYYY-MM-DD 能精确查询某天。"""
         now = dt.datetime.now().astimezone()
-        today = app_module._date_of(now)
+        today = date_of(now)
         self.client.post("/api/entries", json={
             "content": "指定日期记录",
             "points": 4,
@@ -192,6 +196,41 @@ class ApiTest(unittest.TestCase):
     def test_bad_day_param(self):
         r = self.client.get("/api/entries?day=not-a-date")
         self.assertEqual(r.status_code, 400)
+
+    def test_calendar_levels(self):
+        """贡献日历：返回最近 N 天，每日点数与五档强度正确。"""
+        now = dt.datetime.now().astimezone()
+        today = date_of(now)
+        self.client.post("/api/entries", json={
+            "content": "今天一条",
+            "points": 1,
+            "ts": dt.datetime.combine(today, dt.time(12, 0)).astimezone().isoformat(),
+        })
+        self.client.post("/api/entries", json={
+            "content": "今天第二条",
+            "points": 2,
+            "ts": dt.datetime.combine(today, dt.time(13, 0)).astimezone().isoformat(),
+        })
+        r = self.client.get("/api/calendar?days=30")
+        self.assertEqual(r.status_code, 200)
+        arr = r.get_json()
+        self.assertEqual(len(arr), 30)
+        # 从最旧到最新
+        self.assertEqual(arr[0]["date"] < arr[-1]["date"], True)
+        by_date = {x["date"]: x for x in arr}
+        today_info = by_date[today.isoformat()]
+        self.assertEqual(today_info["points"], 3)   # 1 + 2
+        self.assertEqual(today_info["level"], 2)    # 3 点 → 2 档
+        # 无记录日：0 点 0 档
+        five_days_ago = (today - dt.timedelta(days=5)).isoformat()
+        self.assertEqual(by_date[five_days_ago]["points"], 0)
+        self.assertEqual(by_date[five_days_ago]["level"], 0)
+
+    def test_calendar_day_param_clamp(self):
+        """days 参数会被钳制在合理范围。"""
+        r = self.client.get("/api/calendar?days=99999")
+        arr = r.get_json()
+        self.assertLessEqual(len(arr), 3650)
 
     def test_delete(self):
         r = self.client.post("/api/entries", json={"content": "要删掉", "points": 1})
