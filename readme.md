@@ -9,6 +9,6 @@
 - 备忘录
 
 ## 状态
-🚧 需求确定中，尚未开始编码。
+🚧 v1 开发中 — 已完成后端骨架、打卡记录增删改查、Vue 3 前端。完整进度看 `docs/requirements.md` 验收标准。
 
-![status](https://img.shields.io/badge/status-planning-yellow)
+![status](https://img.shields.io/badge/status-in%20development-blue)

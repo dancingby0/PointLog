@@ -12,7 +12,28 @@
   <h1>PointLog</h1>
 
   <section class="today">
-    <div class="points">今日点数 <strong>{{ todayPoints }}</strong></div>
+    <div class="points">{{ selectedLabel }} 点数 <strong>{{ dayPoints }}</strong></div>
+  </section>
+
+  <!-- 日期切换器（git log 风格） -->
+  <section class="card day-picker">
+    <div class="day-picker-head">
+      <h2>日期切换</h2>
+      <div class="day-controls">
+        <input v-model="jumpTo" type="date" @change="jumpToDay" title="跳转到某天">
+        <button type="button" class="ghost" @click="goToday" :disabled="selectedIsToday">回到今天</button>
+      </div>
+    </div>
+    <ul class="day-list">
+      <li v-for="d in days" :key="d.date"
+          class="day-item" :class="{ active: d.date === selectedDay }"
+          @click="selectDay(d.date)">
+        <span class="day-date">{{ d.date }}</span>
+        <span class="day-week">{{ weekdayLabel(d.date) }}</span>
+        <span class="day-tag" v-if="d.is_today">今天</span>
+        <span class="day-points">{{ d.points }} 点</span>
+      </li>
+    </ul>
   </section>
 
   <form class="card" @submit.prevent="submit">
@@ -26,7 +47,7 @@
     <label>类别（可选）
       <input v-model.trim="form.category" type="text" maxlength="20" placeholder="例：语文 / 运动">
     </label>
-    <label>时间（可选，默认现在）
+    <label>时间（默认：{{ selectedIsToday ? '现在' : selectedDay + ' 12:00' }}，凌晨4点前算昨日）
       <input v-model="form.ts" type="datetime-local">
     </label>
     <button type="submit">{{ editingId ? '保存修改' : '提交' }}</button>
@@ -34,8 +55,8 @@
   </form>
 
   <section class="card">
-    <h2>今天的记录</h2>
-    <p v-if="sortedEntries.length === 0" class="muted">今天还没有记录。</p>
+    <h2>{{ selectedLabel }} 的记录</h2>
+    <p v-if="sortedEntries.length === 0" class="muted">这一天还没有记录。</p>
     <ul v-else class="entry-list">
       <li v-for="e in sortedEntries" :key="e.id" class="entry">
         <span class="entry-time">{{ formatTime(e.ts) }}</span>

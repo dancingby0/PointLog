@@ -23,10 +23,18 @@ def index():
 # ---------- 打卡记录 ----------
 
 def _day_bounds(day: dt.date) -> tuple[dt.datetime, dt.datetime]:
-    """某"自然日"边界（M2 前按 0 点；M2 细化为凌晨 4 点）。"""
-    start = dt.datetime.combine(day, dt.time(0, 0, 0)).astimezone()
+    """某"天"的边界：以凌晨 4 点为界，即 [day 04:00, day+1 04:00)。"""
+    start = dt.datetime.combine(day, dt.time(4, 0, 0)).astimezone()
     end = start + dt.timedelta(days=1)
     return start, end
+
+
+def _date_of(t: dt.datetime) -> dt.date:
+    """按凌晨4点规则，某时刻属于哪一天 = 时间减去4小时后取日历日。
+
+    例：2026-09-06 02:00 → 减去4h → 2026-09-05 22:00 → 归属 2026-09-05。
+    """
+    return (t - dt.timedelta(hours=4)).date()
 
 
 def _parse_ts(s: str) -> dt.datetime:
@@ -42,24 +50,60 @@ def _parse_ts(s: str) -> dt.datetime:
     return parsed
 
 
+@app.get("/api/days")
+def list_days():
+    """返回最近 N 天（默认 14）的 {date, points, is_today}，从新到旧；供日期切换器使用。"""
+    d = data.load(CURRENT_PROFILE)
+    n = request.args.get("days", default=14, type=int)
+    n = max(1, min(n, 90))
+    now = dt.datetime.now().astimezone()
+    today = _date_of(now)
+
+    day_points = {}
+    for e in d["entries"]:
+        try:
+            t = _parse_ts(e["ts"])
+        except (ValueError, TypeError):
+            continue
+        k = _date_of(t)
+        day_points[k] = day_points.get(k, 0) + int(e.get("points", 0))
+
+    days = []
+    for i in range(n):
+        day = today - dt.timedelta(days=i)
+        days.append({
+            "date": day.isoformat(),
+            "points": day_points.get(day, 0),
+            "is_today": i == 0,
+        })
+    return jsonify(days)
+
+
 @app.get("/api/entries")
 def list_entries():
-    """返回：今日记录（含今日点数）。"""
+    """返回某天的记录与点数；?day=YYYY-MM-DD，缺省为"今天"（凌晨4点界）。"""
     d = data.load(CURRENT_PROFILE)
-    now = dt.datetime.now().astimezone()
-    start, end = _day_bounds(now.date())
-    today = []
+    day_str = request.args.get("day")
+    if day_str:
+        try:
+            day = dt.datetime.strptime(day_str, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"error": "day 格式应为 YYYY-MM-DD"}), 400
+    else:
+        day = _date_of(dt.datetime.now().astimezone())
+    start, end = _day_bounds(day)
+    entries = []
     for e in d["entries"]:
         try:
             t = _parse_ts(e["ts"])
         except (ValueError, TypeError):
             continue
         if start <= t < end:
-            today.append(e)
-    today_points = sum(int(e.get("points", 0)) for e in today)
+            entries.append(e)
+    total = sum(int(e.get("points", 0)) for e in entries)
     return jsonify({
-        "entries": sorted(today, key=lambda e: e["ts"], reverse=True),
-        "today_points": today_points,
+        "entries": sorted(entries, key=lambda e: e["ts"], reverse=True),
+        "day_points": total,
     })
 
 

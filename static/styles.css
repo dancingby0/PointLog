@@ -113,3 +113,53 @@ button.ghost:hover { color: var(--text); background: #f0f2f5; }
 
 .error { color: var(--danger); }
 .muted { color: var(--muted); font-size: 13px; }
+
+/* ---- 日期切换器（git log 风格） ---- */
+.day-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.day-picker-head h2 { margin: 0; }
+.day-controls { display: flex; gap: 8px; align-items: center; }
+.day-controls input { width: auto; margin: 0; }
+.day-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.day-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.12s;
+}
+.day-item:last-child { border-bottom: 0; }
+.day-item:hover { background: #f0f2f5; }
+.day-item.active {
+  background: #e8effc;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.day-date {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  min-width: 92px;
+}
+.day-week { color: var(--muted); min-width: 38px; }
+.day-tag {
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.day-points { margin-left: auto; font-weight: 700; color: var(--accent); }
