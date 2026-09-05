@@ -103,19 +103,27 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_yesterday_2330_belongs_to_yesterday(self):
-        """昨天 23:30（凌晨4点界之外的自然时间）默认不算"今天"。"""
+        """昨天 23:30（凌晨4点界之外的自然时间）不属于"今天"。"""
         now = dt.datetime.now().astimezone()
-        yesterday_2330 = (now - dt.timedelta(days=1)).replace(hour=23, minute=30, second=0, microsecond=0)
+        today = date_of(now)               # "今天"（4点界日）
+        yesterday = today - dt.timedelta(days=1)
+        ts = dt.datetime.combine(yesterday, dt.time(23, 30)).astimezone()
         r = self.client.post("/api/entries", json={
             "content": "昨夜学习",
             "points": 1,
-            "ts": yesterday_2330.isoformat(),
+            "ts": ts.isoformat(),
         })
         self.assertEqual(r.status_code, 201)
-        r = self.client.get("/api/entries")
-        body = r.get_json()
-        self.assertTrue(all(e["content"] != "昨夜学习" for e in body["entries"]))
-        self.assertEqual(body["day_points"], 0)
+        # 它属于昨天
+        r_y = self.client.get(f"/api/entries?day={yesterday.isoformat()}")
+        body_y = r_y.get_json()
+        self.assertTrue(any(e["content"] == "昨夜学习" for e in body_y["entries"]))
+        self.assertEqual(body_y["day_points"], 1)
+        # 不属于今天
+        r_t = self.client.get(f"/api/entries?day={today.isoformat()}")
+        body_t = r_t.get_json()
+        self.assertTrue(all(e["content"] != "昨夜学习" for e in body_t["entries"]))
+        self.assertEqual(body_t["day_points"], 0)
 
     def test_early_morning_2am_belongs_to_previous_day(self):
         """凌晨 2 点（4 点界内）提交，应归属"昨天"。"""
@@ -198,7 +206,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_calendar_levels(self):
-        """贡献日历：返回最近 N 天，每日点数与五档强度正确。"""
+        """贡献日历：默认只返回"当年 1月1日→今天"，每日点数与五档强度正确。"""
         now = dt.datetime.now().astimezone()
         today = date_of(now)
         self.client.post("/api/entries", json={
@@ -211,26 +219,43 @@ class ApiTest(unittest.TestCase):
             "points": 2,
             "ts": dt.datetime.combine(today, dt.time(13, 0)).astimezone().isoformat(),
         })
-        r = self.client.get("/api/calendar?days=30")
+        r = self.client.get("/api/calendar")
         self.assertEqual(r.status_code, 200)
         arr = r.get_json()
-        self.assertEqual(len(arr), 30)
-        # 从最旧到最新
-        self.assertEqual(arr[0]["date"] < arr[-1]["date"], True)
+        # 从当年 1月1日 到 今天
+        self.assertEqual(arr[0]["date"], f"{today.year}-01-01")
+        self.assertEqual(arr[-1]["date"], today.isoformat())
         by_date = {x["date"]: x for x in arr}
         today_info = by_date[today.isoformat()]
         self.assertEqual(today_info["points"], 3)   # 1 + 2
         self.assertEqual(today_info["level"], 2)    # 3 点 → 2 档
-        # 无记录日：0 点 0 档
-        five_days_ago = (today - dt.timedelta(days=5)).isoformat()
-        self.assertEqual(by_date[five_days_ago]["points"], 0)
-        self.assertEqual(by_date[five_days_ago]["level"], 0)
 
-    def test_calendar_day_param_clamp(self):
-        """days 参数会被钳制在合理范围。"""
-        r = self.client.get("/api/calendar?days=99999")
+    def test_calendar_year_switch(self):
+        """?year 指定历史年份时，返回该年完整窗口。"""
+        now = dt.datetime.now().astimezone()
+        today = date_of(now)
+        prev_year = today.year - 1
+        # 去年某天有记录
+        past_day = dt.date(prev_year, 6, 15)
+        self.client.post("/api/entries", json={
+            "content": "去年的活",
+            "points": 4,
+            "ts": dt.datetime.combine(past_day, dt.time(10, 0)).astimezone().isoformat(),
+        })
+        r = self.client.get(f"/api/calendar?year={prev_year}")
+        self.assertEqual(r.status_code, 200)
         arr = r.get_json()
-        self.assertLessEqual(len(arr), 3650)
+        # 历史年：完整 1月1日 → 12月31日
+        self.assertEqual(arr[0]["date"], f"{prev_year}-01-01")
+        self.assertEqual(arr[-1]["date"], f"{prev_year}-12-31")
+        by_date = {x["date"]: x for x in arr}
+        self.assertEqual(by_date[past_day.isoformat()]["points"], 4)
+        self.assertEqual(by_date[past_day.isoformat()]["level"], 3)  # 4 点 → 3 档
+
+    def test_calendar_bad_year(self):
+        """非法 year 应返回 400。"""
+        self.assertEqual(self.client.get("/api/calendar?year=abc").status_code, 400)
+        self.assertEqual(self.client.get("/api/calendar?year=2100").status_code, 400)
 
     def test_delete(self):
         r = self.client.post("/api/entries", json={"content": "要删掉", "points": 1})

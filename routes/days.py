@@ -61,22 +61,40 @@ def list_days():
 
 @bp.get("/calendar")
 def calendar():
-    """贡献日历：返回最近 N 天（默认 365）的 {date, points, level}，从最旧到最新。"""
+    """贡献日历：返回指定年份的每日数据，从 1月1日 到 min(12月31日, 今天)。
+
+    ?year=YYYY（默认今年）。
+    - 当年：显示 1月1日 → 今天（不显示未来）
+    - 历史年：显示该年完整 1月1日 → 12月31日
+    """
     d = data.load(CURRENT_PROFILE)
-    n = request.args.get("days", default=365, type=int)
-    n = max(7, min(n, 3650))
     now = dt.datetime.now().astimezone()
     today = date_of(now)
+
+    year_str = request.args.get("year")
+    if year_str:
+        try:
+            year = int(year_str)
+        except ValueError:
+            return jsonify({"error": "year 应为四位年份"}), 400
+        if year > today.year or year < 1970:
+            return jsonify({"error": "year 超出合理范围"}), 400
+    else:
+        year = today.year
+
+    start = dt.date(year, 1, 1)
+    end = min(dt.date(year, 12, 31), today)
 
     day_points = _day_points_map(d)
 
     out = []
-    for i in range(n - 1, -1, -1):
-        day = today - dt.timedelta(days=i)
+    day = start
+    while day <= end:
         points = day_points.get(day, 0)
         out.append({
             "date": day.isoformat(),
             "points": points,
             "level": _level_of(points),
         })
+        day += dt.timedelta(days=1)
     return jsonify(out)

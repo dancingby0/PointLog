@@ -31,12 +31,11 @@ function buildContribGrid(days) {
     }
     weeks.push(col);
   }
-  // 月份标签：每周列里第一个有记录的格子所属月份，变化时才显示
-  const months = [];
-  let prev = "";
+  // 月份标签：把 "2026-09" → "9月"
+  const fmtMonth = (ym) => (ym ? String(parseInt(ym.slice(5, 7), 10)) + "月" : "");
   for (const col of weeks) {
     const firstCell = col.find((c) => c.inRange && c.date);
-    const m = firstCell ? firstCell.date.slice(0, 7) : "";
+    const m = firstCell ? fmtMonth(firstCell.date.slice(0, 7)) : "";
     months.push(m !== prev ? m : "");
     prev = m;
   }
@@ -50,7 +49,8 @@ createApp({
       dayPoints: 0,           // 当前所选天的点数
       selectedDay: "",        // 当前所选日期 YYYY-MM-DD
       days: [],               // 日期切换列表（git log 风格）
-      calendarDays: [],       // 贡献日历原始数据（从最旧到最新）
+      calendarDays: [],       // 贡献日历原始数据（按年份窗口）
+      calendarYear: 0,        // 贡献日历当前显示的年份（0=当前年）
       jumpTo: "",             // 快速跳转输入
       editingId: null,        // 正在编辑的记录 id；null 表示新增
       form: { content: "", points: 1, category: "", ts: "" },
@@ -79,6 +79,18 @@ createApp({
     // 贡献日历网格（表格化布局）
     contrib() {
       return buildContribGrid(this.calendarDays);
+    },
+    // 当前系统年份
+    currentYear() {
+      return new Date().getFullYear();
+    },
+    // 贡献日历显示的年份（默认当前年）
+    calYearLabel() {
+      return this.calendarYear || this.currentYear;
+    },
+    // 显示的是过去某年时，才能"往近翻"
+    calCanNext() {
+      return !!this.calendarYear && this.calendarYear < this.currentYear;
     },
   },
 
@@ -123,12 +135,34 @@ createApp({
       this.days = data;
     },
 
-    // 拉取贡献日历数据（近一年每日点数与强度）
+    // 拉取贡献日历数据（按年份窗口）
     async loadCalendar() {
-      const res = await fetch("/api/calendar?days=365");
+      const url = this.calendarYear ? `/api/calendar?year=${this.calendarYear}` : "/api/calendar";
+      const res = await fetch(url);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "加载贡献日历失败");
       this.calendarDays = data;
+    },
+
+    // 往前翻一年（更久远）
+    async prevYear() {
+      const year = (this.calendarYear || this.currentYear) - 1;
+      this.calendarYear = year;
+      await this.loadCalendar();
+    },
+
+    // 往后翻一年（更接近今天；到当前年后回到最新窗口）
+    async nextYear() {
+      if (!this.calCanNext) return;
+      this.calendarYear += 1;
+      if (this.calendarYear >= this.currentYear) this.calendarYear = 0;
+      await this.loadCalendar();
+    },
+
+    // 回到最近一年
+    async goCalendarLatest() {
+      this.calendarYear = 0;
+      await this.loadCalendar();
     },
 
     // 贡献日历格子悬浮提示

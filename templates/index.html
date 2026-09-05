@@ -40,12 +40,17 @@
   <section class="card">
     <div class="card-head">
       <h2>贡献日历</h2>
-      <span class="muted">近一年每日点数 · 点击格子跳转到那天</span>
+      <div class="cal-actions">
+        <button type="button" class="ghost nav-btn" @click="prevYear" title="往前一年">‹</button>
+        <span class="cal-year-label">{{ calYearLabel }}</span>
+        <button type="button" class="ghost nav-btn" @click="nextYear" :disabled="!calCanNext" title="往近一年">›</button>
+        <button type="button" class="ghost" v-if="calendarYear" @click="goCalendarLatest" title="回到最近一年">回今年</button>
+      </div>
     </div>
     <div class="contrib">
-      <div class="contrib-months" :style="{ width: (contrib.weeks.length * 15 - 3) + 'px' }">
+      <div class="contrib-months" :style="{ width: (contrib.weeks.length * 16 - 3) + 'px' }">
         <template v-for="(m, idx) in contrib.months" :key="idx">
-          <span v-if="m" class="contrib-month" :style="{ left: (idx * 15) + 'px' }">{{ m }}</span>
+          <span v-if="m" class="contrib-month" :style="{ left: (idx * 16) + 'px' }">{{ m }}</span>
         </template>
       </div>
       <div class="contrib-row">
