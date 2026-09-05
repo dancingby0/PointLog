@@ -33,6 +33,8 @@ function buildContribGrid(days) {
   }
   // 月份标签：把 "2026-09" → "9月"
   const fmtMonth = (ym) => (ym ? String(parseInt(ym.slice(5, 7), 10)) + "月" : "");
+  const months = [];
+  let prev = "";
   for (const col of weeks) {
     const firstCell = col.find((c) => c.inRange && c.date);
     const m = firstCell ? fmtMonth(firstCell.date.slice(0, 7)) : "";
