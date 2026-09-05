@@ -85,6 +85,48 @@ class DaysApiTest(ApiTestCase):
         self.assertEqual(self.client.get("/api/calendar?year=abc").status_code, 400)
         self.assertEqual(self.client.get("/api/calendar?year=2100").status_code, 400)
 
+    def test_points_line(self):
+        """点数线：有效天 ≤10 直接 40% 分位；窗口固定最近60天。"""
+        now = dt.datetime.now().astimezone()
+        today = date_of(now)
+        # 造 5 个有效打卡日（1..5 分），分布在近几天
+        for i, pts in enumerate([1, 2, 3, 4, 5]):
+            day = today - dt.timedelta(days=i)
+            self.client.post("/api/entries", json={
+                "content": f"line-{pts}",
+                "points": pts,
+                "ts": dt.datetime.combine(day, dt.time(12, 0)).astimezone().isoformat(),
+            })
+        r = self.client.get("/api/line")
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertEqual(body["method"], "direct")
+        self.assertEqual(body["active_days"], 5)
+        self.assertEqual(body["window_days"], 60)
+        # 1,2,3,4,5 → 40% 线性 = 2.6
+        self.assertAlmostEqual(body["baseline"], 2.6, places=2)
+
+    def test_points_line_trim_when_many_days(self):
+        """有效天 >10 → 各剔最低/最高 10% 后取 40% 分位。"""
+        now = dt.datetime.now().astimezone()
+        today = date_of(now)
+        # 造 15 个有效打卡日（1..15 分）
+        for pts in range(1, 16):
+            day = today - dt.timedelta(days=pts - 1)
+            self.client.post("/api/entries", json={
+                "content": f"line-{pts}",
+                "points": pts,
+                "ts": dt.datetime.combine(day, dt.time(12, 0)).astimezone().isoformat(),
+            })
+        r = self.client.get("/api/line")
+        body = r.get_json()
+        self.assertEqual(body["method"], "trimmed")
+        self.assertEqual(body["trimmed_low"], 1)
+        self.assertEqual(body["trimmed_high"], 1)
+        self.assertEqual(body["used_days"], 13)
+        # 剔 1 和 15，剩 2..14，40% 线性插值 = 6.8
+        self.assertAlmostEqual(body["baseline"], 6.8, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,11 +29,13 @@ h1 { font-size: 22px; margin: 0 0 12px; }
   border-radius: 12px;
   padding: 16px 20px;
   margin-bottom: 16px;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
 }
 .today strong { font-size: 28px; }
+.today .points { display: flex; align-items: baseline; gap: 8px; }
+.today-line { margin-top: 6px; display: flex; align-items: baseline; gap: 8px; }
+.today-line .line-label { font-size: 13px; opacity: 0.9; }
+.today-line .line-value { font-size: 20px; }
+.today-line .line-hint { font-size: 12px; opacity: 0.85; }
 
 .card {
   background: var(--card);

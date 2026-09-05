@@ -5,6 +5,7 @@ import datetime as dt
 from flask import Blueprint, jsonify, request
 
 import data
+import stats
 from config import CURRENT_PROFILE
 from utils import date_of, parse_ts
 
@@ -57,6 +58,30 @@ def list_days():
             "is_today": i == 0,
         })
     return jsonify(days)
+
+
+@bp.get("/line")
+def points_line():
+    """点数线：最近至多 60 天（凌晨4点界）内的每日点数做剔极值 40% 分位数。
+
+    返回计算过程，便于前端展示与校验。
+    """
+    d = data.load(CURRENT_PROFILE)
+    now = dt.datetime.now().astimezone()
+    today = date_of(now)
+
+    window_days = 60
+    start_day = today - dt.timedelta(days=window_days - 1)
+    day_points = _day_points_map(d)
+
+    # 只取窗口内的每日点数（含 0）
+    points_in_window = []
+    for i in range(window_days):
+        day = start_day + dt.timedelta(days=i)
+        points_in_window.append(day_points.get(day, 0))
+
+    result = stats.calc_baseline(points_in_window)
+    return jsonify(result)
 
 
 @bp.get("/calendar")

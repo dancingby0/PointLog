@@ -13,6 +13,15 @@
 
   <section class="today">
     <div class="points">{{ selectedLabel }} 点数 <strong>{{ dayPoints }}</strong></div>
+    <div class="today-line" v-if="line">
+      <span class="line-label">点数线</span>
+      <strong class="line-value">{{ lineText }}</strong>
+      <span class="line-hint" v-if="line.active_days > 0">
+        （近 {{ line.window_days }} 天 · {{ line.active_days }} 个打卡日
+        <template v-if="line.method === 'trimmed'">· 剔最高最低各 {{ line.trimmed_low }} 天后</template>
+        取 40% 分位）
+      </span>
+    </div>
   </section>
 
   <!-- 置顶主目标（常驻横幅） -->

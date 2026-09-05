@@ -49,6 +49,7 @@ createApp({
     return {
       entries: [],            // 当前所选天的记录
       dayPoints: 0,           // 当前所选天的点数
+      line: null,             // 点数线（40%分位剔极值）计算结果
       selectedDay: "",        // 当前所选日期 YYYY-MM-DD
       days: [],               // 日期切换列表（git log 风格）
       calendarDays: [],       // 贡献日历原始数据（按年份窗口）
@@ -101,6 +102,12 @@ createApp({
     calCanNext() {
       return !!this.calendarYear && this.calendarYear < this.currentYear;
     },
+    // 点数线展示文本
+    lineText() {
+      if (!this.line || this.line.active_days === 0) return "—";
+      const b = this.line.baseline;
+      return Number.isInteger(b) ? String(b) : b.toFixed(1);
+    },
   },
 
   mounted() {
@@ -115,11 +122,25 @@ createApp({
         await this.loadDays();
         await this.loadCalendar();
         await this.loadMemos();
+        await this.loadLine();
         // 默认选中今天
         const today = this.days.find((d) => d.is_today);
         await this.selectDay(today ? today.date : this.todayStr);
       } catch (err) {
         alert("初始化失败：" + err.message);
+      }
+    },
+
+    // 加载点数线（40% 分位、剔极值；最多最近 60 天）
+    async loadLine() {
+      try {
+        const res = await fetch("/api/line");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "加载点数线失败");
+        this.line = data;
+      } catch (err) {
+        console.error(err);
+        this.line = null;
       }
     },
 
@@ -335,9 +356,9 @@ createApp({
       this.form.ts = this.defaultTsFor(this.selectedDay);
     },
 
-    // 刷新记录 + 日期列表 + 贡献日历 + 当日感想
+    // 刷新记录 + 日期列表 + 贡献日历 + 当日感想 + 点数线
     async refresh() {
-      await Promise.all([this.loadEntries(), this.loadDays(), this.loadCalendar(), this.loadNote()]);
+      await Promise.all([this.loadEntries(), this.loadDays(), this.loadCalendar(), this.loadNote(), this.loadLine()]);
     },
 
     formatTime(iso) {
