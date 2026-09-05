@@ -6,7 +6,7 @@ from flask import Blueprint, jsonify, request
 
 import data
 import stats
-from config import CURRENT_PROFILE
+import config
 from utils import date_of, parse_ts
 
 bp = Blueprint("days", __name__, url_prefix="/api")
@@ -41,7 +41,7 @@ def _day_points_map(d: dict) -> dict:
 @bp.get("/days")
 def list_days():
     """返回最近 N 天（默认 14）的 {date, points, is_today}，从新到旧；供日期切换器使用。"""
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     n = request.args.get("days", default=14, type=int)
     n = max(1, min(n, 90))
     now = dt.datetime.now().astimezone()
@@ -66,7 +66,7 @@ def points_line():
 
     返回计算过程，便于前端展示与校验。
     """
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     now = dt.datetime.now().astimezone()
     today = date_of(now)
 
@@ -92,7 +92,7 @@ def calendar():
     - 当年：显示 1月1日 → 今天（不显示未来）
     - 历史年：显示该年完整 1月1日 → 12月31日
     """
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     now = dt.datetime.now().astimezone()
     today = date_of(now)
 

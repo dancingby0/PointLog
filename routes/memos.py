@@ -3,7 +3,7 @@
 from flask import Blueprint, jsonify, request
 
 import data
-from config import CURRENT_PROFILE
+import config
 
 bp = Blueprint("memos", __name__, url_prefix="/api")
 
@@ -11,7 +11,7 @@ bp = Blueprint("memos", __name__, url_prefix="/api")
 @bp.get("/memos")
 def list_memos():
     """返回全部备忘 + 当前主目标。"""
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     return jsonify({
         "memos": d["memos"],
         "main_goal": d.get("main_goal", ""),
@@ -28,20 +28,20 @@ def create_memo():
         return jsonify({"error": "内容过长（最多200字）"}), 400
 
     memo = {"id": data.new_id(), "text": text}
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     d["memos"].append(memo)
-    data.save(CURRENT_PROFILE, d)
+    data.save(config.CURRENT_PROFILE, d)
     return jsonify(memo), 201
 
 
 @bp.delete("/memos/<memo_id>")
 def delete_memo(memo_id: str):
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     before = len(d["memos"])
     d["memos"] = [m for m in d["memos"] if m.get("id") != memo_id]
     if len(d["memos"]) == before:
         return jsonify({"error": "备忘不存在"}), 404
-    data.save(CURRENT_PROFILE, d)
+    data.save(config.CURRENT_PROFILE, d)
     return jsonify({"ok": True})
 
 
@@ -52,7 +52,7 @@ def update_main_goal():
     goal = str(body.get("goal", "")).strip()
     if len(goal) > 100:
         return jsonify({"error": "主目标过长（最多100字）"}), 400
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     d["main_goal"] = goal
-    data.save(CURRENT_PROFILE, d)
+    data.save(config.CURRENT_PROFILE, d)
     return jsonify({"main_goal": goal})

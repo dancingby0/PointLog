@@ -5,7 +5,7 @@ import datetime as dt
 from flask import Blueprint, jsonify, request
 
 import data
-from config import CURRENT_PROFILE
+import config
 from utils import date_of, day_bounds, parse_ts
 
 bp = Blueprint("entries", __name__, url_prefix="/api")
@@ -14,7 +14,7 @@ bp = Blueprint("entries", __name__, url_prefix="/api")
 @bp.get("/entries")
 def list_entries():
     """返回某天的记录与点数；?day=YYYY-MM-DD，缺省为"今天"（凌晨4点界）。"""
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     day_str = request.args.get("day")
     if day_str:
         try:
@@ -67,26 +67,26 @@ def create_entry():
         "content": content,
         "category": (str(body.get("category") or "")).strip() or None,
     }
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     d["entries"].append(entry)
-    data.save(CURRENT_PROFILE, d)
+    data.save(config.CURRENT_PROFILE, d)
     return jsonify(entry), 201
 
 
 @bp.delete("/entries/<entry_id>")
 def delete_entry(entry_id: str):
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     before = len(d["entries"])
     d["entries"] = [e for e in d["entries"] if e.get("id") != entry_id]
     if len(d["entries"]) == before:
         return jsonify({"error": "记录不存在"}), 404
-    data.save(CURRENT_PROFILE, d)
+    data.save(config.CURRENT_PROFILE, d)
     return jsonify({"ok": True})
 
 
 @bp.put("/entries/<entry_id>")
 def update_entry(entry_id: str):
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     entry = next((e for e in d["entries"] if e.get("id") == entry_id), None)
     if entry is None:
         return jsonify({"error": "记录不存在"}), 404
@@ -118,5 +118,5 @@ def update_entry(entry_id: str):
             return jsonify({"error": "时间格式不正确"}), 400
         entry["ts"] = body["ts"]
 
-    data.save(CURRENT_PROFILE, d)
+    data.save(config.CURRENT_PROFILE, d)
     return jsonify(entry)

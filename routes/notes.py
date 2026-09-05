@@ -5,7 +5,7 @@ import datetime as dt
 from flask import Blueprint, jsonify, request
 
 import data
-from config import CURRENT_PROFILE
+import config
 from utils import date_of
 
 bp = Blueprint("notes", __name__, url_prefix="/api")
@@ -33,7 +33,7 @@ def get_note():
     day = _require_day()
     if day is None:
         return jsonify({"error": "day 格式应为 YYYY-MM-DD"}), 400
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     note = d["daily_notes"].get(day.isoformat())
     return jsonify({"date": day.isoformat(), "note": note if note else None})
 
@@ -50,9 +50,9 @@ def save_note():
     if not content:
         return jsonify({"error": "感想不能为空"}), 400
 
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     d["daily_notes"][day.isoformat()] = content
-    data.save(CURRENT_PROFILE, d)
+    data.save(config.CURRENT_PROFILE, d)
     return jsonify({"date": day.isoformat(), "note": content})
 
 
@@ -62,10 +62,10 @@ def delete_note():
     day = _require_day()
     if day is None:
         return jsonify({"error": "day 格式应为 YYYY-MM-DD"}), 400
-    d = data.load(CURRENT_PROFILE)
+    d = data.load(config.CURRENT_PROFILE)
     iso = day.isoformat()
     if iso not in d["daily_notes"]:
         return jsonify({"error": "该天没有感想"}), 404
     del d["daily_notes"][iso]
-    data.save(CURRENT_PROFILE, d)
+    data.save(config.CURRENT_PROFILE, d)
     return jsonify({"ok": True})

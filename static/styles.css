@@ -167,6 +167,60 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .memo-item:last-child { border-bottom: 0; }
 .memo-text { flex: 1; }
 
+/* ---- 顶部档案栏 ---- */
+.profile-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 14px;
+}
+.profile-bar .pf-name { font-weight: 700; }
+.profile-bar .spacer { flex: 1; }
+.profile-bar select, .profile-bar input[type=text] {
+  margin: 0;
+  width: auto;
+  display: inline-block;
+  padding: 6px 10px;
+  font-size: 14px;
+}
+.profile-bar button { padding: 6px 12px; font-size: 13px; }
+
+/* ---- 锁屏遮罩 ---- */
+.lock-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+.lock-box {
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px 32px;
+  width: 320px;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+}
+.lock-box h2 { margin: 0 0 6px; }
+.lock-box .lock-tip { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.lock-box input {
+  text-align: center;
+  font-size: 24px;
+  letter-spacing: 10px;
+  margin-bottom: 14px;
+}
+.lock-err { color: var(--danger); font-size: 13px; min-height: 18px; }
+.lock-actions { display: flex; gap: 10px; justify-content: center; }
+
 /* ---- 日期切换器（git log 风格） ---- */
 .day-picker-head {
   display: flex;

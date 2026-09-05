@@ -27,11 +27,49 @@ def default_data() -> dict:
 def profile_dir(profile: str) -> Path:
     """返回某个档案对应的目录（不存在则创建）。"""
     # 档案名仅允许安全字符，防止路径穿越
-    if not profile or any(c in profile for c in '\\/:*?"<>|'):
+    if not profile or any(c in profile for c in '\\/:*?"<>|') or profile in (".", ".."):
         raise ValueError(f"非法档案名: {profile!r}")
     d = DATA_DIR / profile
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def list_profiles() -> list[str]:
+    """列出 data/ 下的档案名（按名称排序）。"""
+    if not DATA_DIR.exists():
+        return []
+    names = [p.name for p in DATA_DIR.iterdir()
+             if p.is_dir() and not p.name.startswith(".") and not p.name == "__pycache__"]
+    return sorted(names)
+
+
+def settings_path(profile: str) -> Path:
+    """档案级设置文件（PIN 等），独立于 data.json。"""
+    return profile_dir(profile) / "settings.json"
+
+
+def load_settings(profile: str) -> dict:
+    """读取档案设置；不存在或损坏时返回空 dict。"""
+    path = settings_path(profile)
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            s = json.load(f)
+        return s if isinstance(s, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_settings(profile: str, settings: dict) -> None:
+    """原子写 settings.json（复用临时文件替换策略）。"""
+    path = settings_path(profile)
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
 
 
 def data_path(profile: str) -> Path:

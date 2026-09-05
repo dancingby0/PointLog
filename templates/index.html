@@ -11,6 +11,21 @@
 <main class="wrap" id="app">
   <h1>PointLog</h1>
 
+  <!-- 档案栏 -->
+  <div class="profile-bar">
+    <span>📁 档案：</span>
+    <strong class="pf-name">{{ currentProfile }}{{ currentHasPin ? ' 🔒' : '' }}</strong>
+    <select :value="currentProfile" @change="onProfileSelect" title="切换档案">
+      <option v-for="p in profiles" :key="p.name" :value="p.name">
+        {{ p.name }}{{ p.has_pin ? '（有锁）' : '' }}
+      </option>
+    </select>
+    <span class="spacer"></span>
+    <button type="button" class="ghost" @click="openNewProfile">＋新建</button>
+    <button type="button" class="ghost" @click="openPinSetup">{{ currentHasPin ? '改 PIN' : '设 PIN' }}</button>
+    <button type="button" class="ghost" v-if="currentHasPin && !locked" @click="doLock">锁定</button>
+  </div>
+
   <section class="today">
     <div class="points">{{ selectedLabel }} 点数 <strong>{{ dayPoints }}</strong></div>
     <div class="today-line" v-if="line">
@@ -160,6 +175,31 @@
     </ul>
   </section>
 </main>
+
+<!-- 锁屏 / PIN 弹窗遮罩 -->
+<div class="lock-overlay" v-if="dialog">
+  <div class="lock-box">
+    <h2>{{ dialogTitle }}</h2>
+    <p class="lock-tip">{{ dialog.tip }}</p>
+
+    <template v-if="dialog.mode === 'new'">
+      <input v-model="newProfileName" type="text" maxlength="30"
+             placeholder="档案名（如 study）" @keyup.enter="submitDialog">
+    </template>
+    <template v-else>
+      <input v-model="pinInput" type="password" inputmode="numeric" maxlength="8"
+             placeholder="输入 4~8 位数字 PIN" @keyup.enter="submitDialog">
+    </template>
+
+    <p class="lock-err">{{ dialogError }}</p>
+    <div class="lock-actions">
+      <button type="button" @click="submitDialog">确定</button>
+      <button type="button" class="ghost" v-if="dialog.mode !== 'lock'" @click="closeDialog">取消</button>
+      <button type="button" class="ghost" v-if="dialog.mode === 'pinSetup' && currentHasPin" @click="clearPin">清除 PIN</button>
+    </div>
+  </div>
+</div>
+
 <script src="/static/vendor/vue.global.prod.js"></script>
 <script src="/static/utils.js"></script>
 <script src="/static/app.js"></script>

@@ -64,6 +64,15 @@ createApp({
       mainGoal: "",           // 置顶主目标
       goalDraft: "",          // 主目标编辑框
       goalEditing: false,     // 是否正在编辑主目标
+      // ---- 档案 + PIN ----
+      profiles: [],           // 档案列表 [{name, has_pin}]
+      currentProfile: "",     // 当前档案名
+      currentHasPin: false,   // 当前档案是否设了 PIN
+      dialog: null,           // 弹窗状态 {mode, tip}；mode: lock/switch/pinSetup/new
+      pinInput: "",           // PIN 输入框
+      newProfileName: "",     // 新建档案名输入
+      dialogError: "",        // 弹窗错误提示
+      lastActivity: Date.now(), // 最近一次操作时间（闲置判定）
     };
   },
 
@@ -108,27 +117,211 @@ createApp({
       const b = this.line.baseline;
       return Number.isInteger(b) ? String(b) : b.toFixed(1);
     },
+    // 弹窗标题
+    dialogTitle() {
+      if (!this.dialog) return "";
+      switch (this.dialog.mode) {
+        case "lock": return "🔒 已锁定";
+        case "switch": return `切换到「${this.dialog.target}」`;
+        case "pinSetup": return this.currentHasPin ? "修改 PIN" : "设置 PIN";
+        case "new": return "新建档案";
+        default: return "";
+      }
+    },
   },
 
   mounted() {
     this.init();
+    this.watchIdle();
   },
 
   methods: {
     weekdayLabel,
 
+    // 启动：先取档案信息，判断当前档案是否需 PIN 解锁
     async init() {
+      await this.loadProfiles();
+      if (this.currentHasPin) {
+        this.showLock("此档案已加密，请输入 PIN 解锁");
+      } else {
+        await this.loadAll();
+      }
+    },
+
+    // 解锁后（或无需 PIN 时）加载全部业务数据
+    async loadAll() {
       try {
         await this.loadDays();
         await this.loadCalendar();
         await this.loadMemos();
         await this.loadLine();
-        // 默认选中今天
         const today = this.days.find((d) => d.is_today);
         await this.selectDay(today ? today.date : this.todayStr);
       } catch (err) {
         alert("初始化失败：" + err.message);
       }
+    },
+
+    // ---------- 档案 + PIN ----------
+
+    async loadProfiles() {
+      try {
+        const res = await fetch("/api/profiles");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "加载档案失败");
+        this.profiles = data.profiles;
+        this.currentProfile = data.current;
+        const cur = this.profiles.find((p) => p.name === data.current);
+        this.currentHasPin = !!(cur && cur.has_pin);
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
+    showLock(tip) {
+      this.dialog = { mode: "lock", tip };
+      this.pinInput = "";
+      this.dialogError = "";
+    },
+
+    // 下拉切换档案
+    async onProfileSelect(ev) {
+      const name = ev.target.value;
+      if (name === this.currentProfile) return;
+      const target = this.profiles.find((p) => p.name === name);
+      if (target && target.has_pin) {
+        // 有锁：弹窗输入 PIN
+        this.dialog = { mode: "switch", tip: `档案「${name}」已设 PIN，请输入后切换`, target: name };
+        this.pinInput = "";
+        this.dialogError = "";
+      } else {
+        await this.doSwitch(name, "");
+      }
+    },
+
+    async doSwitch(name, pin) {
+      try {
+        const res = await fetch("/api/profiles/switch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, pin }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "切换失败");
+        // 切换成功后整体刷新（档案数据全变了）
+        location.reload();
+      } catch (err) {
+        this.dialogError = err.message;
+      }
+    },
+
+    // 新建档案
+    openNewProfile() {
+      this.dialog = { mode: "new", tip: "创建一个全新的空档案（数据与其他档案隔离）" };
+      this.newProfileName = "";
+      this.dialogError = "";
+    },
+
+    // 设置 / 修改 PIN
+    openPinSetup() {
+      this.dialog = { mode: "pinSetup", tip: this.currentHasPin ? "输入新的 4~8 位数字 PIN" : "为当前档案设置 4~8 位数字 PIN" };
+      this.pinInput = "";
+      this.dialogError = "";
+    },
+
+    // 手动立即锁定
+    doLock() {
+      this.showLock("已锁定，输入 PIN 解锁");
+    },
+
+    clearPin() {
+      this.dialogError = "";
+      this.setPin("");
+    },
+
+    // 弹窗确认按钮分派
+    async submitDialog() {
+      const mode = this.dialog && this.dialog.mode;
+      this.dialogError = "";
+      if (mode === "lock" || mode === "switch") {
+        const pin = this.pinInput.trim();
+        if (mode === "switch") {
+          await this.doSwitch(this.dialog.target, pin);
+        } else {
+          try {
+            const res = await fetch("/api/unlock", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ pin }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "解锁失败");
+            this.dialog = null;
+            await this.loadAll();
+          } catch (err) {
+            this.dialogError = err.message;
+            this.pinInput = "";
+          }
+        }
+      } else if (mode === "pinSetup") {
+        await this.setPin(this.pinInput.trim());
+      } else if (mode === "new") {
+        const name = this.newProfileName.trim();
+        if (!name) { this.dialogError = "档案名不能为空"; return; }
+        try {
+          const res = await fetch("/api/profiles", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "创建失败");
+          this.dialog = null;
+          // 新建后直接切过去
+          await this.doSwitch(name, "");
+        } catch (err) {
+          this.dialogError = err.message;
+        }
+      }
+    },
+
+    async setPin(pin) {
+      try {
+        const res = await fetch("/api/pin", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "保存失败");
+        this.currentHasPin = data.has_pin;
+        this.dialog = null;
+      } catch (err) {
+        this.dialogError = err.message;
+      }
+    },
+
+    closeDialog() {
+      // 锁定态不能直接关
+      if (this.dialog && this.dialog.mode === "lock") return;
+      this.dialog = null;
+      this.dialogError = "";
+    },
+
+    // ---------- 闲置自动锁 ----------
+    watchIdle() {
+      // 用户活动重置时间戳
+      const touch = () => { this.lastActivity = Date.now(); };
+      ["mousemove", "keydown", "click", "scroll"].forEach((ev) =>
+        window.addEventListener(ev, touch, { passive: true })
+      );
+      // 每 30 秒检查是否闲置超 5 分钟
+      window.setInterval(() => {
+        if (!this.currentHasPin || this.dialog) return;
+        if (Date.now() - this.lastActivity > 5 * 60 * 1000) {
+          this.showLock("已闲置 5 分钟，输入 PIN 解锁");
+        }
+      }, 30 * 1000);
     },
 
     // 加载点数线（40% 分位、剔极值；最多最近 60 天）
