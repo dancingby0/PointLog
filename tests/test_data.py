@@ -12,8 +12,16 @@ class DataLayerTest(DataTestCase):
     def test_new_profile_returns_default(self):
         d = data.load(self.profile)
         self.assertEqual(d["entries"], [])
-        self.assertEqual(d["daily_notes"], [])
+        self.assertEqual(d["daily_notes"], {})
         self.assertEqual(d["memos"], [])
+
+    def test_old_list_daily_notes_is_migrated(self):
+        """早期版本 daily_notes 是数组，读取时应迁移为空字典。"""
+        d = data.default_data()
+        d["daily_notes"] = []   # 模拟旧数据
+        data.save(self.profile, d)
+        loaded = data.load(self.profile)
+        self.assertEqual(loaded["daily_notes"], {})
 
     def test_save_then_load_roundtrip(self):
         d = data.default_data()

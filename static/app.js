@@ -56,6 +56,8 @@ createApp({
       jumpTo: "",             // 快速跳转输入
       editingId: null,        // 正在编辑的记录 id；null 表示新增
       form: { content: "", points: 1, category: "", ts: "" },
+      noteDraft: "",          // 每日感想编辑框内容（随所选日期切换）
+      hasNote: false,         // 所选日期是否已有保存的感想
     };
   },
 
@@ -115,13 +117,14 @@ createApp({
       }
     },
 
-    // 切换所选日期：加载记录 + 表单时间预设
+    // 切换所选日期：加载记录、感想 + 表单时间预设
     async selectDay(day) {
       this.selectedDay = day;
       if (!this.editingId) {
         this.form.ts = this.defaultTsFor(day);
       }
       await this.loadEntries();
+      await this.loadNote();
     },
 
     // 表单默认时间：今天=现在；其它天=该日 12:00（便于补录）
@@ -171,6 +174,75 @@ createApp({
     cellTitle(c) {
       if (!c.inRange) return "";
       return c.points > 0 ? `${c.date} · ${c.points} 点` : c.date;
+    },
+
+    // 加载所选日期的感想
+    async loadNote() {
+      try {
+        const res = await fetch(`/api/notes?day=${this.selectedDay}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "加载感想失败");
+        this.noteDraft = data.note || "";
+        this.hasNote = !!data.note;
+      } catch (err) {
+        console.error(err);
+        this.noteDraft = "";
+        this.hasNote = false;
+      }
+    },
+
+    // 保存（覆盖）当天整篇感想
+    async saveNote() {
+      const content = this.noteDraft.trim();
+      if (!content) {
+        alert("感想不能为空");
+        return;
+      }
+      try {
+        const res = await fetch("/api/notes", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ day: this.selectedDay, content }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "保存失败");
+        this.noteDraft = data.note;
+        this.hasNote = true;
+      } catch (err) {
+        alert("保存失败：" + err.message);
+      }
+    },
+
+    // 删除当天整篇感想
+    async deleteNote() {
+      if (!confirm(`删除 ${this.selectedLabel} 的整篇感想？`)) return;
+      try {
+        const res = await fetch(`/api/notes?day=${this.selectedDay}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok && res.status !== 404) throw new Error(data.error || "删除失败");
+        this.noteDraft = "";
+        this.hasNote = false;
+      } catch (err) {
+        alert("删除失败：" + err.message);
+      }
+    },
+
+    // 在感想末尾插入此刻时间，方便追加新段落
+    stampNote() {
+      const now = new Date();
+      const p = (n) => String(n).padStart(2, "0");
+      const stamp = `[${p(now.getHours())}:${p(now.getMinutes())}] `;
+      this.noteDraft = this.noteDraft.trimEnd()
+        ? `${this.noteDraft.trimEnd()}\n\n${stamp}`
+        : stamp;
+      // 聚焦并把光标移到末尾
+      this.$nextTick(() => {
+        const ta = document.querySelector(".card textarea");
+        if (ta) {
+          ta.focus();
+          ta.selectionStart = ta.selectionEnd = ta.value.length;
+        }
+      });
     },
 
     async loadEntries() {
@@ -257,9 +329,9 @@ createApp({
       this.form.ts = this.defaultTsFor(this.selectedDay);
     },
 
-    // 刷新记录 + 日期列表 + 贡献日历（点数会变）
+    // 刷新记录 + 日期列表 + 贡献日历 + 当日感想
     async refresh() {
-      await Promise.all([this.loadEntries(), this.loadDays(), this.loadCalendar()]);
+      await Promise.all([this.loadEntries(), this.loadDays(), this.loadCalendar(), this.loadNote()]);
     },
 
     formatTime(iso) {

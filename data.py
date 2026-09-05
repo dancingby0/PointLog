@@ -18,7 +18,7 @@ def default_data() -> dict:
     """返回一份全新的数据结构。"""
     return {
         "entries": [],       # 打卡记录
-        "daily_notes": [],   # 每日感想（一天一篇）
+        "daily_notes": {},   # 每日感想：{ "YYYY-MM-DD": "文本" }，一天一篇
         "memos": [],         # 备忘录（含置顶主目标）
     }
 
@@ -56,6 +56,9 @@ def load(profile: str) -> dict:
     base = default_data()
     for key in base:
         data.setdefault(key, base[key])
+    # 迁移：早期版本的 daily_notes 是数组占位，现改为 {日期: 文本} 字典
+    if not isinstance(data["daily_notes"], dict):
+        data["daily_notes"] = {}
     return data
 
 

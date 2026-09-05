@@ -101,6 +101,20 @@
       </li>
     </ul>
   </section>
+
+  <!-- 每日感想（一天一篇，可补写/追加/删除当天） -->
+  <section class="card">
+    <div class="card-head">
+      <h2>{{ selectedLabel }} 的感想</h2>
+      <button type="button" class="ghost" @click="stampNote" title="在末尾插入此刻时间，方便追加一段">⏱ 插入此刻时间</button>
+    </div>
+    <textarea v-model="noteDraft" rows="6"
+      placeholder="写下这一天的感想：梦、去了哪里、任何想记的事……（选中历史日期即可补写当天）"></textarea>
+    <div class="note-actions">
+      <button type="button" @click="saveNote">保存感想</button>
+      <button type="button" class="ghost" v-if="hasNote || noteDraft.trim()" @click="deleteNote">删除当天感想</button>
+    </div>
+  </section>
 </main>
 <script src="/static/vendor/vue.global.prod.js"></script>
 <script src="/static/utils.js"></script>
