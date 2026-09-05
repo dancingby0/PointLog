@@ -128,6 +128,10 @@ createApp({
         default: return "";
       }
     },
+    // 是否处于锁屏态
+    isLocked() {
+      return !!(this.dialog && this.dialog.mode === "lock");
+    },
   },
 
   mounted() {
