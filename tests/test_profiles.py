@@ -101,6 +101,42 @@ class ProfilesApiTest(ApiTestCase):
         # 清除后解锁不再需要 PIN
         self.assertEqual(self.client.post("/api/unlock", json={"pin": ""}).status_code, 200)
 
+    def test_rename_current_profile(self):
+        r = self.client.put("/api/profiles/rename", json={"name": "alpha2"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["current"], "alpha2")
+        # 目录名已改，alpha 不再存在
+        self.assertEqual(self.client.post("/api/profiles/switch", json={"name": "alpha"}).status_code, 404)
+
+    def test_rename_to_existing_rejected(self):
+        self.client.post("/api/profiles", json={"name": "taken"})
+        r = self.client.put("/api/profiles/rename", json={"name": "taken"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_delete_other_profile(self):
+        self.client.post("/api/profiles", json={"name": "victim"})
+        r = self.client.delete("/api/profiles/victim")
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(self.client.post("/api/profiles/switch", json={"name": "victim"}).status_code, 404)
+
+    def test_delete_requires_pin(self):
+        # 先建 secret，切过去给它设 PIN，再切回 alpha
+        self.client.post("/api/profiles", json={"name": "secret"})
+        self.client.post("/api/profiles/switch", json={"name": "secret"})
+        self.client.put("/api/pin", json={"pin": "1234"})
+        self.client.post("/api/profiles/switch", json={"name": "alpha"})
+        # 有 PIN 档案被删除需 PIN
+        self.assertEqual(self.client.delete("/api/profiles/secret").status_code, 401)
+        r = self.client.delete("/api/profiles/secret", json={"pin": "1234"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_delete_only_profile_rejected(self):
+        # 只允许一个档案存在的场景：把 alpha 删到只剩一个前先造两个
+        self.client.post("/api/profiles", json={"name": "keep"})
+        self.assertEqual(self.client.delete("/api/profiles/alpha").status_code, 200)
+        # 现在只剩 keep（当前档案），不能再删
+        self.assertEqual(self.client.delete("/api/profiles/keep").status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

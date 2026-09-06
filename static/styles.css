@@ -113,6 +113,8 @@ button.ghost {
   border: 1px solid var(--border);
 }
 button.ghost:hover { color: var(--text); background: #f0f2f5; }
+button.ghost.danger { color: var(--danger); }
+button.ghost.danger:hover { background: #fee2e2; color: var(--danger); }
 
 .error { color: var(--danger); }
 .muted { color: var(--muted); font-size: 13px; }
@@ -222,11 +224,29 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 .lock-box h2 { margin: 0 0 6px; }
 .lock-box .lock-tip { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.lock-box .lock-tip + input,
+.lock-box input + input { margin-top: 6px; }
+.delete-code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: var(--danger);
+  text-align: center;
+  margin: 0 0 10px;
+  user-select: all;
+}
 .lock-box input {
   text-align: center;
   font-size: 24px;
   letter-spacing: 10px;
   margin-bottom: 14px;
+}
+/* 重命名用的普通文本输入：正常字号 */
+.lock-box input.plain {
+  font-size: 16px;
+  letter-spacing: normal;
+  text-align: left;
 }
 /* 提示文字保持小号、正常间距（PIN 数字才用大字） */
 .lock-box input::placeholder {

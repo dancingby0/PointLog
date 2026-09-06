@@ -7,11 +7,50 @@ v1 约定：
 
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 
 # data/<档案名>/data.json
 DATA_DIR = Path(__file__).resolve().parent / "data"
+
+
+def validate_profile_name(profile: str) -> None:
+    """校验档案名合法性（安全字符、防路径穿越）；非法抛 ValueError。"""
+    if not profile:
+        raise ValueError("档案名不能为空")
+    if any(c in profile for c in '\\/:*?"<>|') or profile in (".", ".."):
+        raise ValueError(f"非法档案名: {profile!r}")
+
+
+def profile_dir(profile: str) -> Path:
+    """返回某个档案对应的目录（不存在则创建）。"""
+    validate_profile_name(profile)
+    d = DATA_DIR / profile
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def rename_profile(old: str, new: str) -> None:
+    """重命名档案目录。若新名已存在抛 ValueError。"""
+    validate_profile_name(old)
+    validate_profile_name(new)
+    old_dir = DATA_DIR / old
+    new_dir = DATA_DIR / new
+    if not old_dir.is_dir():
+        raise ValueError(f"档案不存在: {old!r}")
+    if new_dir.exists():
+        raise ValueError(f"档案已存在: {new!r}")
+    old_dir.rename(new_dir)
+
+
+def delete_profile(profile: str) -> None:
+    """删除档案（整个目录含所有数据）。"""
+    validate_profile_name(profile)
+    d = DATA_DIR / profile
+    if not d.is_dir():
+        raise ValueError(f"档案不存在: {profile!r}")
+    shutil.rmtree(d)
 
 
 def default_data() -> dict:

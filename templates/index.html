@@ -22,6 +22,8 @@
     </select>
     <span class="spacer"></span>
     <button type="button" class="ghost" @click="exportData" title="导出当前档案全部数据为 JSON 文件">导出 JSON</button>
+    <button type="button" class="ghost" @click="openRenameProfile" title="重命名当前档案">✏️ 改名</button>
+    <button type="button" class="ghost danger" @click="openDeleteProfile" title="删除当前档案">🗑 删除</button>
     <button type="button" class="ghost" @click="openNewProfile">＋新建</button>
     <button type="button" class="ghost" @click="openPinSetup">{{ currentHasPin ? '改 PIN' : '设 PIN' }}</button>
     <button type="button" class="ghost" v-if="currentHasPin && !isLocked" @click="doLock">锁定</button>
@@ -203,16 +205,37 @@
     </ul>
   </section>
 
-  <!-- 锁屏 / PIN 弹窗遮罩（必须在 #app 内部才能被 Vue 控制） -->
+  <!-- 锁屏 / 操作确认弹窗遮罩（必须在 #app 内部才能被 Vue 控制） -->
   <div class="lock-overlay" v-if="dialog">
     <div class="lock-box">
       <h2>{{ dialogTitle }}</h2>
       <p class="lock-tip">{{ dialog.tip }}</p>
 
+      <!-- 新建档案：只需名字 -->
       <template v-if="dialog.mode === 'new'">
         <input v-model="newProfileName" type="text" maxlength="30"
                placeholder="档案名（如 study）" @keyup.enter="submitDialog">
       </template>
+
+      <!-- 重命名：新名字（若已设 PIN 还需要 PIN） -->
+      <template v-else-if="dialog.mode === 'rename'">
+        <input v-model="renameName" type="text" maxlength="30" class="plain"
+               placeholder="新的档案名" @keyup.enter="submitDialog">
+        <input v-if="currentHasPin" v-model="pinInput" type="password" inputmode="numeric" maxlength="8"
+               placeholder="输入当前 PIN 确认" @keyup.enter="submitDialog">
+      </template>
+
+      <!-- 删除档案：验证码（防误触）+ PIN（若已设） -->
+      <template v-else-if="dialog.mode === 'delete'">
+        <p class="lock-tip" style="margin-bottom:6px">请输入下方数字确认删除（不可恢复）：</p>
+        <p class="delete-code">{{ dialog.code }}</p>
+        <input v-model="codeInput" type="text" inputmode="numeric" maxlength="4" class="plain"
+               placeholder="输入上面这串数字" @keyup.enter="submitDialog">
+        <input v-if="currentHasPin" v-model="pinInput" type="password" inputmode="numeric" maxlength="8"
+               placeholder="输入当前 PIN 确认" @keyup.enter="submitDialog">
+      </template>
+
+      <!-- 其余（解锁 / 切换 / 设PIN）：只需 PIN -->
       <template v-else>
         <input v-model="pinInput" type="password" inputmode="numeric" maxlength="8"
                placeholder="输入 4~8 位数字 PIN" @keyup.enter="submitDialog">
@@ -220,7 +243,7 @@
 
       <p class="lock-err">{{ dialogError }}</p>
       <div class="lock-actions">
-        <button type="button" @click="submitDialog">确定</button>
+        <button type="button" @click="submitDialog">{{ dialog.mode === 'delete' ? '确认删除' : '确定' }}</button>
         <button type="button" class="ghost" v-if="dialog.mode !== 'lock'" @click="closeDialog">取消</button>
         <button type="button" class="ghost" v-if="dialog.mode === 'pinSetup' && currentHasPin" @click="clearPin">清除 PIN</button>
       </div>

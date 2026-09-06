@@ -100,3 +100,57 @@ def set_pin():
         settings.pop("pin_hash", None)
     data.save_settings(config.CURRENT_PROFILE, settings)
     return jsonify({"has_pin": bool(settings.get("pin_hash"))})
+
+
+def _require_pin(profile: str) -> tuple[bool, str]:
+    """校验目标档案 PIN（若设置了 PIN）。返回 (是否通过, 错误信息)。"""
+    if not _has_pin(profile):
+        return True, ""
+    body = request.get_json(silent=True) or {}
+    pin = str(body.get("pin", ""))
+    ph = data.load_settings(profile).get("pin_hash")
+    if not check_password_hash(ph, pin):
+        return False, "PIN 不正确"
+    return True, ""
+
+
+@bp.put("/profiles/rename")
+def rename_profile_api():
+    """重命名当前档案：body {name, pin}。改名后当前档案跟随新名。"""
+    body = request.get_json(silent=True) or {}
+    new_name = str(body.get("name", "")).strip()
+    if not new_name:
+        return jsonify({"error": "新档案名不能为空"}), 400
+
+    ok, err = _require_pin(config.CURRENT_PROFILE)
+    if not ok:
+        return jsonify({"error": err}), 401
+
+    old_name = config.CURRENT_PROFILE
+    try:
+        data.rename_profile(old_name, new_name)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    config.CURRENT_PROFILE = new_name
+    return jsonify({"current": new_name, "has_pin": _has_pin(new_name)})
+
+
+@bp.delete("/profiles/<name>")
+def delete_profile_api(name: str):
+    """删除指定档案：需 PIN 确认。不允许删除最后一个档案。"""
+    profiles = data.list_profiles()
+    if name not in profiles:
+        return jsonify({"error": "档案不存在"}), 404
+    if len(profiles) <= 1:
+        return jsonify({"error": "至少保留一个档案"}), 400
+
+    ok, err = _require_pin(name)
+    if not ok:
+        return jsonify({"error": err}), 401
+
+    data.delete_profile(name)
+    # 若删除的是当前档案，切到第一个剩余档案
+    if config.CURRENT_PROFILE == name:
+        remaining = [p for p in data.list_profiles() if p != name]
+        config.CURRENT_PROFILE = remaining[0]
+    return jsonify({"ok": True, "current": config.CURRENT_PROFILE})

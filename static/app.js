@@ -70,9 +70,11 @@ createApp({
       profiles: [],           // 档案列表 [{name, has_pin}]
       currentProfile: "",     // 当前档案名
       currentHasPin: false,   // 当前档案是否设了 PIN
-      dialog: null,           // 弹窗状态 {mode, tip}；mode: lock/switch/pinSetup/new
+      dialog: null,           // 弹窗状态 {mode, tip, code?}；mode: lock/switch/pinSetup/new/rename/delete
       pinInput: "",           // PIN 输入框
       newProfileName: "",     // 新建档案名输入
+      renameName: "",         // 重命名输入
+      codeInput: "",          // 删除确认验证码输入
       dialogError: "",        // 弹窗错误提示
       lastActivity: Date.now(), // 最近一次操作时间（闲置判定）
     };
@@ -128,6 +130,8 @@ createApp({
         case "switch": return `切换到「${this.dialog.target}」`;
         case "pinSetup": return this.currentHasPin ? "修改 PIN" : "设置 PIN";
         case "new": return "新建档案";
+        case "rename": return "重命名当前档案";
+        case "delete": return "⚠️ 删除当前档案";
         default: return "";
       }
     },
@@ -267,6 +271,32 @@ createApp({
       this.dialogError = "";
     },
 
+    // 重命名当前档案
+    openRenameProfile() {
+      this.dialog = {
+        mode: "rename",
+        tip: this.currentHasPin ? `给「${this.currentProfile}」起新名字（需输入 PIN 确认）` : `给「${this.currentProfile}」起个新名字`,
+      };
+      this.renameName = this.currentProfile;
+      this.pinInput = "";
+      this.dialogError = "";
+    },
+
+    // 删除当前档案（防误触：随机验证码 + 若有 PIN 需确认）
+    openDeleteProfile() {
+      const code = String(Math.floor(1000 + Math.random() * 9000));
+      this.dialog = {
+        mode: "delete",
+        code,
+        tip: this.currentHasPin
+          ? `将永久删除「${this.currentProfile}」的所有数据（需输入验证码和 PIN）`
+          : `将永久删除「${this.currentProfile}」的所有数据，不可恢复！`,
+      };
+      this.codeInput = "";
+      this.pinInput = "";
+      this.dialogError = "";
+    },
+
     // 设置 / 修改 PIN
     openPinSetup() {
       this.dialog = { mode: "pinSetup", tip: this.currentHasPin ? "输入新的 4~8 位数字 PIN" : "为当前档案设置 4~8 位数字 PIN" };
@@ -333,7 +363,55 @@ createApp({
         } catch (err) {
           this.dialogError = err.message;
         }
+      } else if (mode === "rename") {
+        const name = this.renameName.trim();
+        if (!name) { this.dialogError = "新档案名不能为空"; return; }
+        try {
+          const res = await fetch("/api/profiles/rename", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, pin: this.pinInput.trim() }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "重命名失败");
+          this.dialog = null;
+          await this.refreshAfterProfileChange(data.current);
+        } catch (err) {
+          this.dialogError = err.message;
+        }
+      } else if (mode === "delete") {
+        // 前端防误触：验证码必须匹配
+        if (this.codeInput.trim() !== this.dialog.code) {
+          this.dialogError = "验证码不正确，已取消";
+          this.codeInput = "";
+          return;
+        }
+        try {
+          const res = await fetch(`/api/profiles/${encodeURIComponent(this.currentProfile)}`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pin: this.pinInput.trim() }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "删除失败");
+          this.dialog = null;
+          await this.refreshAfterProfileChange(data.current);
+        } catch (err) {
+          this.dialogError = err.message;
+        }
       }
+    },
+
+    // 档案被删除/改名后：重置视图并切到新的当前档案
+    async refreshAfterProfileChange(newCurrent) {
+      this.currentProfile = newCurrent;
+      this.currentHasPin = false;
+      this.dialog = null;
+      await this.loadProfiles();
+      const cur = this.profiles.find((p) => p.name === newCurrent);
+      this.currentHasPin = !!(cur && cur.has_pin);
+      this.resetForProfileChange();
+      await this.loadAll();
     },
 
     async setPin(pin) {
