@@ -58,22 +58,30 @@
     </template>
   </section>
 
-  <!-- 日期切换器（git log 风格） -->
+  <!-- 日期选择器（年 + 月 → 当月逐日列表） -->
   <section class="card day-picker">
     <div class="day-picker-head">
-      <h2>日期切换</h2>
+      <h2>日期</h2>
       <div class="day-controls">
-        <input v-model="jumpTo" type="date" @change="jumpToDay" title="跳转到某天">
-        <button type="button" class="ghost" @click="goToday" :disabled="selectedIsToday">回到今天</button>
+        <button type="button" class="ghost nav-btn" @click="shiftMonth(-1)" title="上个月">‹</button>
+        <select :value="viewMonth.slice(0, 4)" @change="onYearChange" class="month-sel">
+          <option v-for="y in yearOptions" :key="y" :value="String(y)">{{ y }} 年</option>
+        </select>
+        <select :value="viewMonth.slice(5, 7)" @change="onMonthChange" class="month-sel">
+          <option v-for="m in 12" :key="m" :value="String(m).padStart(2, '0')">{{ m }} 月</option>
+        </select>
+        <button type="button" class="ghost nav-btn" @click="shiftMonth(1)" title="下个月">›</button>
+        <button type="button" class="ghost" @click="goToday" :disabled="selectedIsToday && viewMonth === todayStr.slice(0,7)">今天</button>
       </div>
     </div>
     <ul class="day-list">
       <li v-for="d in days" :key="d.date"
-          class="day-item" :class="{ active: d.date === selectedDay }"
-          @click="selectDay(d.date)">
-        <span class="day-date">{{ d.date }}</span>
+          class="day-item" :class="{ active: d.date === selectedDay, future: d.is_future }"
+          @click="!d.is_future && selectDay(d.date)">
+        <span class="day-date">{{ d.date.slice(8) }}</span>
         <span class="day-week">{{ weekdayLabel(d.date) }}</span>
         <span class="day-tag" v-if="d.is_today">今天</span>
+        <span class="day-note" v-if="d.has_note" title="这一天写了感想">📝</span>
         <span class="day-points">{{ d.points }} 点</span>
       </li>
     </ul>
@@ -114,7 +122,7 @@
 
   <form class="card" @submit.prevent="submit">
     <h2>{{ editingId ? '编辑打卡' : '新增打卡' }}</h2>
-    <label>做什么（一句话）
+    <label>做了什么呢？
       <input v-model.trim="form.content" type="text" maxlength="100" placeholder="例：背完30个英语单词">
     </label>
     <label>点数
@@ -166,15 +174,15 @@
     <template v-else-if="hasNote">
       <p class="note-view">{{ noteDraft }}</p>
       <div class="note-actions">
-        <button type="button" class="ghost" @click="startNoteEdit">✏️ 编辑 / 追加</button>
-        <button type="button" class="ghost" @click="deleteNote">删除当天感想</button>
+        <button type="button" class="ghost" @click="startNoteEdit">✏️ 修改感想</button>
+        <button type="button" class="ghost" @click="deleteNote">🗑️ 删除感想</button>
       </div>
     </template>
 
     <!-- 展示模式：还没有感想 -->
     <template v-else>
       <p class="muted">这一天还没有感想。</p>
-      <button type="button" @click="startNoteEdit">✏️ 写一段感想</button>
+      <button type="button" @click="startNoteEdit">✏️ 写感想</button>
     </template>
   </section>
 

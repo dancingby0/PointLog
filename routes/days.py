@@ -38,26 +38,58 @@ def _day_points_map(d: dict) -> dict:
     return day_points
 
 
+def _month_last_day(year: int, month: int) -> dt.date:
+    """返回某年某月的最后一天。"""
+    if month == 12:
+        nxt = dt.date(year + 1, 1, 1)
+    else:
+        nxt = dt.date(year, month + 1, 1)
+    return nxt - dt.timedelta(days=1)
+
+
 @bp.get("/days")
 def list_days():
-    """返回最近 N 天（默认 14）的 {date, points, is_today}，从新到旧；供日期切换器使用。"""
+    """返回某年某月的逐日概览：?month=YYYY-MM（默认当月）。
+
+    每天含 {date, points, has_note, is_today, is_future}，
+    供"年+月 → 当月每天列表"式日期选择器使用。
+    """
     d = data.load(config.CURRENT_PROFILE)
-    n = request.args.get("days", default=14, type=int)
-    n = max(1, min(n, 90))
     now = dt.datetime.now().astimezone()
     today = date_of(now)
 
+    month_str = request.args.get("month")
+    if month_str:
+        try:
+            year, month = (int(x) for x in month_str.split("-"))
+            first = dt.date(year, month, 1)
+        except (ValueError, TypeError):
+            return jsonify({"error": "month 格式应为 YYYY-MM"}), 400
+    else:
+        first = today.replace(day=1)
+
+    cur_first = today.replace(day=1)
+    if first > cur_first:
+        return jsonify({"error": "不能查看未来月份"}), 400
+
     day_points = _day_points_map(d)
+    notes = d["daily_notes"]
+    last = _month_last_day(first.year, first.month)
 
     days = []
-    for i in range(n):
-        day = today - dt.timedelta(days=i)
+    day = first
+    while day <= last:
+        iso = day.isoformat()
         days.append({
-            "date": day.isoformat(),
+            "date": iso,
             "points": day_points.get(day, 0),
-            "is_today": i == 0,
+            "has_note": iso in notes,
+            "is_today": day == today,
+            "is_future": day > today,
         })
-    return jsonify(days)
+        day += dt.timedelta(days=1)
+
+    return jsonify({"month": first.strftime("%Y-%m"), "days": days})
 
 
 @bp.get("/line")

@@ -51,10 +51,11 @@ createApp({
       dayPoints: 0,           // 当前所选天的点数
       line: null,             // 点数线（40%分位剔极值）计算结果
       selectedDay: "",        // 当前所选日期 YYYY-MM-DD
-      days: [],               // 日期切换列表（git log 风格）
+      viewMonth: "",          // 日期选择器当前查看的年月 YYYY-MM（默认当月）
+      days: [],               // 当月逐日列表（含 has_note）
+      yearOptions: [],        // 可选年份（当年±5）
       calendarDays: [],       // 贡献日历原始数据（按年份窗口）
       calendarYear: 0,        // 贡献日历当前显示的年份（0=当前年）
-      jumpTo: "",             // 快速跳转输入
       editingId: null,        // 正在编辑的记录 id；null 表示新增
       form: { content: "", points: 1, category: "", ts: "" },
       noteDraft: "",          // 每日感想编辑框内容（随所选日期切换）
@@ -89,8 +90,9 @@ createApp({
     selectedLabel() {
       if (!this.selectedDay) return "";
       if (this.selectedDay === this.todayStr) return "今天";
-      const idx = this.days.findIndex((d) => d.date === this.selectedDay);
-      if (idx === 1) return "昨天";
+      // 用日期差判断是否昨天（当天不在当月列表也能正确）
+      const diff = Math.round((fromDateStr(this.todayStr) - fromDateStr(this.selectedDay)) / 86400000);
+      if (diff === 1) return "昨天";
       return `${this.selectedDay} ${weekdayLabel(this.selectedDay)}`;
     },
     selectedIsToday() {
@@ -156,15 +158,25 @@ createApp({
     // 解锁后（或无需 PIN 时）加载全部业务数据
     async loadAll() {
       try {
+        this.initYearOptions();
+        this.viewMonth = this.todayStr.slice(0, 7);   // 默认当年当月
         await this.loadDays();
         await this.loadCalendar();
         await this.loadMemos();
         await this.loadLine();
-        const today = this.days.find((d) => d.is_today);
-        await this.selectDay(today ? today.date : this.todayStr);
+        // 默认选中今天（若今天在当前查看月）
+        const target = this.days.find((d) => d.is_today) || this.days[0];
+        await this.selectDay(target ? target.date : this.todayStr);
       } catch (err) {
         alert("初始化失败：" + err.message);
       }
+    },
+
+    // 年份下拉：当年 ±5
+    initYearOptions() {
+      const cur = new Date().getFullYear();
+      this.yearOptions = [];
+      for (let y = cur - 5; y <= cur; y++) this.yearOptions.push(y);
     },
 
     // ---------- 档案 + PIN ----------
@@ -236,7 +248,6 @@ createApp({
       this.days = [];
       this.calendarDays = [];
       this.calendarYear = 0;
-      this.jumpTo = "";
       this.editingId = null;
       this.form = { content: "", points: 1, category: "", ts: "" };
       this.noteDraft = "";
@@ -392,12 +403,57 @@ createApp({
       return day === this.todayStr ? toLocalInput(new Date()) : `${day}T12:00`;
     },
 
-    // 拉取日期切换列表（最近14天各天点数）
+    // 拉取当月逐日列表（按月视图）
     async loadDays() {
-      const res = await fetch("/api/days");
+      const month = this.viewMonth || this.todayStr.slice(0, 7);
+      const res = await fetch(`/api/days?month=${month}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "加载日期失败");
-      this.days = data;
+      this.days = data.days;
+      this.viewMonth = data.month;
+    },
+
+    // 月份变化后定位：当月有今天→今天；否则选该月最后一天（列表从新到旧）
+    pickMonthDay() {
+      const todayIn = this.days.find((d) => d.is_today);
+      if (todayIn) return todayIn.date;
+      return this.days[this.days.length - 1].date;
+    },
+
+    // 刷新月份列表并选中一个代表性日期
+    async reloadMonthView() {
+      await this.loadDays();
+      await this.selectDay(this.pickMonthDay());
+    },
+
+    // 年份下拉变化：组合成新月份
+    async onYearChange(ev) {
+      const year = ev.target.value;
+      const month = this.viewMonth.slice(5, 7);
+      this.viewMonth = `${year}-${month}`;
+      await this.reloadMonthView();
+    },
+
+    // 月份下拉变化
+    async onMonthChange(ev) {
+      const month = ev.target.value;
+      const year = this.viewMonth.slice(0, 4);
+      const ym = `${year}-${month}`;
+      const cur = this.todayStr.slice(0, 7);
+      if (ym > cur) { alert("不能查看未来月份"); return; }
+      this.viewMonth = ym;
+      await this.reloadMonthView();
+    },
+
+    // 切到上/下月（下月不可超过当月）
+    async shiftMonth(delta) {
+      const d = fromDateStr(this.viewMonth + "-01");
+      d.setMonth(d.getMonth() + delta);
+      const ym = toDateStr(d).slice(0, 7);
+      const cur = this.todayStr.slice(0, 7);
+      if (ym > cur) { alert("不能查看未来月份"); return; }
+      this.viewMonth = ym;
+      await this.reloadMonthView();
     },
 
     // 拉取贡献日历数据（按年份窗口）
@@ -535,18 +591,11 @@ createApp({
       }
     },
 
-    // 日期输入框跳转
-    jumpToDay() {
-      if (!this.jumpTo) return;
-      if (!this.days.some((d) => d.date === this.jumpTo)) {
-        this.days.unshift({ date: this.jumpTo, points: null, is_today: false });
-      }
-      this.selectDay(this.jumpTo);
-    },
-
-    goToday() {
-      this.jumpTo = "";
-      this.selectDay(this.todayStr);
+    // 回到今天（切到当月并选中今天）
+    async goToday() {
+      this.viewMonth = this.todayStr.slice(0, 7);
+      await this.loadDays();
+      await this.selectDay(this.todayStr);
     },
 
     async submit() {

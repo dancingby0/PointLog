@@ -238,7 +238,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .lock-err { color: var(--danger); font-size: 13px; min-height: 18px; }
 .lock-actions { display: flex; gap: 10px; justify-content: center; }
 
-/* ---- 日期切换器（git log 风格） ---- */
+/* ---- 日期选择器（年+月 → 当月逐日列表） ---- */
 .day-picker-head {
   display: flex;
   align-items: center;
@@ -247,13 +247,19 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   flex-wrap: wrap;
 }
 .day-picker-head h2 { margin: 0; }
-.day-controls { display: flex; gap: 8px; align-items: center; }
-.day-controls input { width: auto; margin: 0; }
+.day-controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.day-controls .month-sel {
+  width: auto;
+  margin: 0;
+  display: inline-block;
+  padding: 6px 8px;
+  font-size: 14px;
+}
 .day-list {
   list-style: none;
   margin: 12px 0 0;
   padding: 0;
-  max-height: 260px;
+  max-height: 420px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -262,7 +268,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 7px 12px;
   cursor: pointer;
   font-size: 14px;
   border-bottom: 1px solid var(--border);
@@ -274,9 +280,12 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   background: #e8effc;
   box-shadow: inset 3px 0 0 var(--accent);
 }
+.day-item.future { opacity: 0.35; cursor: default; }
+.day-item.future:hover { background: transparent; }
 .day-date {
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-  min-width: 92px;
+  font-weight: 600;
+  min-width: 30px;
 }
 .day-week { color: var(--muted); min-width: 38px; }
 .day-tag {
@@ -286,6 +295,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   border-radius: 999px;
   padding: 1px 8px;
 }
+.day-note { font-size: 13px; }
 .day-points { margin-left: auto; font-weight: 700; color: var(--accent); }
 
 /* ---- 贡献日历（GitHub 风格热力图） ---- */
