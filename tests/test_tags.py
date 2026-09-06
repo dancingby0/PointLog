@@ -37,7 +37,7 @@ class TagsApiTest(ApiTestCase):
         tags = self.client.get("/api/tags/diary").get_json()["tags"]
         self.assertEqual(tags, [])
         # 切回原档案仍能看到
-        self.client.post("/api/profiles/switch", json={"name": "api_test"})
+        self.client.post("/api/profiles/switch", json={"name": self.profile})
         tags = self.client.get("/api/tags/diary").get_json()["tags"]
         self.assertIn("学习", tags)
 
