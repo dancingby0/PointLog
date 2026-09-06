@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted } from "vue";
-import { state, loadStatsSummary } from "../store";
+import EChart from "../components/EChart.vue";
+import { state, loadStatsSummary, loadStatsTrend } from "../store";
 
 const RANGES = [
   { key: "week", label: "本周" },
@@ -32,7 +33,34 @@ const last30 = computed(() => {
   return cells;
 });
 
-onMounted(loadStatsSummary);
+// 月度趋势 option（ECharts 柱 + 感想线）
+const trendOption = computed(() => {
+  const labels = state.statsTrend.map((x) => x.label);
+  const points = state.statsTrend.map((x) => x.points);
+  const notes = state.statsTrend.map((x) => x.notes_days);
+  return {
+    tooltip: { trigger: "axis" },
+    grid: { left: 40, right: 16, top: 30, bottom: 24 },
+    xAxis: { type: "category", data: labels, axisLabel: { interval: 0, rotate: 30, fontSize: 10 } },
+    yAxis: { type: "value", minInterval: 1 },
+    series: [
+      {
+        name: "点数", type: "bar", data: points,
+        itemStyle: { color: "#3b82f6", borderRadius: [3, 3, 0, 0] },
+      },
+      {
+        name: "感想天数", type: "line", data: notes, smooth: true,
+        itemStyle: { color: "#f59e0b" }, lineStyle: { color: "#f59e0b" },
+      },
+    ],
+    legend: { top: 0, data: ["点数", "感想天数"] },
+  };
+});
+
+onMounted(() => {
+  loadStatsSummary();
+  loadStatsTrend();
+});
 </script>
 
 <template>
@@ -78,6 +106,16 @@ onMounted(loadStatsSummary);
                 :title="c.iso"></span>
         </div>
         <p class="muted" style="margin-top:10px">期间写了 {{ s.notes_days }} 天感想。</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>近 12 个月趋势</h2>
+          <span class="muted">柱 = 每月点数 · 线 = 感想天数</span>
+        </div>
+        <div class="trend-chart">
+          <EChart :option="trendOption" />
+        </div>
       </section>
     </template>
     <p v-else class="muted">加载统计中…</p>

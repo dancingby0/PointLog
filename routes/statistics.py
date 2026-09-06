@@ -80,3 +80,62 @@ def summary():
 def _day_points_map_if_present(d: dict) -> dict:
     """统一入口：从档案 entries 汇总 daily {date: points}。"""
     return _day_points_of(d.get("entries", []))
+
+
+@bp.get("/trend")
+def trend():
+    """月度趋势：近 N 个月每月的 {点数, 打卡天数, 感想天数}。?months=12。"""
+    try:
+        months = int(request.args.get("months", 12))
+        months = max(3, min(months, 24))
+    except ValueError:
+        return jsonify({"error": "months 应为整数"}), 400
+
+    now = dt.datetime.now().astimezone()
+    today = date_of(now)
+    d = data.load(config.CURRENT_PROFILE)
+    day_points = _day_points_map_if_present(d)
+    notes = d.get("daily_notes", {})
+
+    # 生成近 months 个月的 (year, month)
+    buckets = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        buckets.append((y, m))
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    buckets.reverse()
+
+    out = []
+    for y, m in buckets:
+        start = dt.date(y, m, 1)
+        # 当月最后一天
+        if m == 12:
+            end = dt.date(y + 1, 1, 1) - dt.timedelta(days=1)
+        else:
+            end = dt.date(y, m + 1, 1) - dt.timedelta(days=1)
+        # 未来月截断到今天
+        if start > today:
+            continue
+        end = min(end, today)
+
+        month_points = 0
+        check_days = set()
+        for day, pts in day_points.items():
+            if start <= day <= end:
+                month_points += pts
+                check_days.add(day)
+        # 感想天数：该月内 YYYY-MM- 前缀匹配
+        prefix = f"{y:04d}-{m:02d}-"
+        note_days = sum(1 for ds in notes if str(ds).startswith(prefix))
+
+        out.append({
+            "month": f"{y:04d}-{m:02d}",
+            "label": f"{y}年{m}月",
+            "points": month_points,
+            "days": len(check_days),
+            "notes_days": note_days,
+        })
+    return jsonify(out)

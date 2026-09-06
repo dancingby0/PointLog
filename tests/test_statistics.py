@@ -42,6 +42,28 @@ class SummaryApiTest(ApiTestCase):
         r = self.client.get("/api/stats/summary?range=haha")
         self.assertEqual(r.status_code, 400)
 
+    def test_trend_by_month(self):
+        today = date_of(dt.datetime.now().astimezone())
+        # 本月今天 + 上月同一天
+        self._add(today, 3)
+        last_month = (today.replace(day=1) - dt.timedelta(days=1)).replace(day=min(today.day, 28))
+        self._add(last_month, 5)
+        r = self.client.get("/api/stats/trend?months=12")
+        body = r.get_json()
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(body), 12)
+        this_label = f"{today.year}年{today.month}月"
+        cur = next(x for x in body if x["label"] == this_label)
+        self.assertEqual(cur["points"], 3)
+        # 找到上月那一项
+        lm_label = f"{last_month.year}年{last_month.month}月"
+        lm = next(x for x in body if x["label"] == lm_label)
+        self.assertEqual(lm["points"], 5)
+
+    def test_trend_clamp(self):
+        r = self.client.get("/api/stats/trend?months=999")
+        self.assertEqual(len(r.get_json()), 24)
+
 
 if __name__ == "__main__":
     unittest.main()

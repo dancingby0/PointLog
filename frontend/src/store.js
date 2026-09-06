@@ -20,6 +20,7 @@ export const state = reactive({
   txs: [],                // 流水列表
   statsSummary: null,     // 统计：坚持与概况
   statsRange: "month",    // 统计时间范围
+  statsTrend: [],         // 统计：月度趋势
   editingId: null,        // 正在编辑的记录 id
   form: { content: "", points: 1, category: "", ts: "" },
   noteDraft: "",          // 感想草稿
@@ -766,6 +767,17 @@ export async function loadStatsSummary() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "加载统计失败");
     state.statsSummary = data;
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function loadStatsTrend() {
+  try {
+    const res = await fetch("/api/stats/trend?months=12");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载趋势失败");
+    state.statsTrend = data;
   } catch (err) {
     console.error(err);
   }

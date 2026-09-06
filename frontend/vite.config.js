@@ -9,6 +9,16 @@ export default defineConfig({
   build: {
     outDir: "../static/dist",
     emptyOutDir: true,
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        // 把 echarts 单独拆成 vendor chunk，主包更小、浏览器可长缓存
+        manualChunks: {
+          echarts: ["echarts/core", "echarts/charts", "echarts/components", "echarts/renderers"],
+          vendor: ["vue", "vue-router"],
+        },
+      },
+    },
   },
   server: {
     port: 5173,
