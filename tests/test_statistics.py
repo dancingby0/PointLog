@@ -25,6 +25,9 @@ class SummaryApiTest(ApiTestCase):
         self.assertEqual(body["period_points"], 0)
         self.assertEqual(body["current_streak"], 0)
         self.assertEqual(body["notes_days"], 0)
+        # recent：近 30 天，全部 0 点
+        self.assertEqual(len(body["recent"]), 30)
+        self.assertTrue(all(x["points"] == 0 for x in body["recent"]))
 
     def test_month_summary(self):
         today = date_of(dt.datetime.now().astimezone())
@@ -37,6 +40,12 @@ class SummaryApiTest(ApiTestCase):
         self.assertEqual(body["period_points"], 5)
         self.assertEqual(body["current_streak"], 2)  # 今天+昨天
         self.assertEqual(body["notes_days"], 1)
+        # recent：今天与昨天 points>0，其余为 0
+        by_date = {x["date"]: x for x in body["recent"]}
+        self.assertEqual(by_date[today.isoformat()]["points"], 3)
+        self.assertEqual(by_date[(today - dt.timedelta(days=1)).isoformat()]["points"], 2)
+        zero_day = (today - dt.timedelta(days=5)).isoformat()
+        self.assertEqual(by_date[zero_day]["points"], 0)
 
     def test_bad_range(self):
         r = self.client.get("/api/stats/summary?range=haha")

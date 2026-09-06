@@ -70,6 +70,12 @@ def summary():
     # 连续天数基于"全部打卡日"（不限定范围，因为 streak 是全局连续性）
     streaks = stats.calc_streaks(set(day_points.keys()))
 
+    # 近 30 天每日点数（供前端"打卡格子"判断当天是否真打过卡）
+    recent = []
+    for i in range(29, -1, -1):
+        day = today - dt.timedelta(days=i)
+        recent.append({"date": day.isoformat(), "points": day_points.get(day, 0)})
+
     return jsonify({
         "range": range_name,
         "start": start.isoformat(),
@@ -79,6 +85,7 @@ def summary():
         "notes_days": notes_days,
         "current_streak": streaks["current_streak"],
         "longest_streak": streaks["longest_streak"],
+        "recent": recent,
     })
 
 

@@ -18,20 +18,14 @@ async function changeRange(r) {
 
 const s = computed(() => state.statsSummary);
 
-// 最近 30 天打卡格（streak 视觉）
+// 最近 30 天打卡格（streak 视觉）—— 绿 = 当天真打过卡（点数>0），灰 = 没打卡
 const last30 = computed(() => {
-  if (!s.value) return [];
-  const today = new Date();
-  const cells = [];
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    // start<=day<=end 判断该天是否在统计范围内且有点
-    const on = iso >= s.value.start && iso <= s.value.end;
-    cells.push({ iso, on, isToday: i === 0 });
-  }
-  return cells;
+  if (!s.value || !Array.isArray(s.value.recent)) return [];
+  return s.value.recent.map((item) => ({
+    iso: item.date,
+    on: item.points > 0,
+    isToday: item.date === s.value.end,
+  }));
 });
 
 // 月度趋势 option（ECharts 柱 + 感想线）
