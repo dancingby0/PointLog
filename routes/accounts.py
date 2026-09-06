@@ -1,0 +1,155 @@
+"""本地账号 API：新建/登录/登出/注销/自动登录 + 账号 PIN。
+
+账号是 v2.3 新增顶层；档案与资产都挂账号下。账号间完全隔离。
+"""
+
+from flask import Blueprint, jsonify, request
+from werkzeug.security import check_password_hash, generate_password_hash
+
+import config
+import data
+
+bp = Blueprint("accounts", __name__, url_prefix="/api/auth")
+
+PIN_MIN_LEN = 4
+PIN_MAX_LEN = 8
+
+
+def _validate_pin(pin: str):
+    if not pin.isdigit():
+        return "PIN 只能包含数字"
+    if not (PIN_MIN_LEN <= len(pin) <= PIN_MAX_LEN):
+        return f"PIN 长度需为 {PIN_MIN_LEN}~{PIN_MAX_LEN} 位"
+    return None
+
+
+def _has_account_pin(name: str) -> bool:
+    return bool(data._load_account_settings(name).get("pin_hash"))
+
+
+@bp.get("")
+def list_accounts_api():
+    """账号列表 + 当前选中 + 自动登录标记。"""
+    meta = data.load_accounts_meta()
+    accounts = data.list_accounts()
+    return jsonify({
+        "accounts": accounts,
+        "current": meta.get("current", ""),
+        "auto_login": meta.get("auto_login", False),
+        "logged_in": config.CURRENT_ACCOUNT,
+    })
+
+
+@bp.post("")
+def create_account_api():
+    """新建账号（可设账号 PIN）。body {name, pin?}。"""
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name", "")).strip()
+    try:
+        data.validate_account_name(name)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
+        data.create_account(name)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    pin = str(body.get("pin", ""))
+    if pin:
+        err = _validate_pin(pin)
+        if err:
+            return jsonify({"error": err}), 400
+        s = data._load_account_settings(name)
+        s["pin_hash"] = generate_password_hash(pin)
+        data.save_account_settings(name, s)
+    return jsonify({"name": name, "has_pin": _has_account_pin(name)}), 201
+
+
+@bp.post("/login")
+def login_account_api():
+    """登录/进入账号：body {name, pin?}。设置 CURRENT_ACCOUNT，进入其首档案。"""
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name", ""))
+    meta = data.load_accounts_meta()
+    if name not in meta["accounts"]:
+        return jsonify({"error": "账号不存在"}), 404
+
+    if _has_account_pin(name):
+        pin = str(body.get("pin", ""))
+        ph = data._load_account_settings(name).get("pin_hash")
+        if not check_password_hash(ph, pin):
+            return jsonify({"error": "PIN 不正确"}), 401
+
+    config.CURRENT_ACCOUNT = name
+    meta["current"] = name
+    data.save_accounts_meta(meta)
+
+    # 默认进入该账号首档案
+    profs = data.account_profile_dirs(name)
+    config.CURRENT_PROFILE = profs[0] if profs else "default"
+    return jsonify({"account": name, "profile": config.CURRENT_PROFILE})
+
+
+@bp.post("/logout")
+def logout_account_api():
+    """登出：清当前账号/档案。"""
+    config.CURRENT_ACCOUNT = ""
+    config.CURRENT_PROFILE = "default"
+    return jsonify({"ok": True})
+
+
+@bp.post("/set-auto-login")
+def set_auto_login():
+    """设置自动登录：body {enabled: bool}。开启时记到当前账号。"""
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled", False))
+    meta = data.load_accounts_meta()
+    meta["auto_login"] = enabled
+    if enabled and config.CURRENT_ACCOUNT:
+        meta["current"] = config.CURRENT_ACCOUNT
+    data.save_accounts_meta(meta)
+    return jsonify({"auto_login": enabled, "current": meta.get("current", "")})
+
+
+@bp.put("/pin")
+def set_account_pin():
+    """当前账号设置/清除 PIN。body {pin}（空串清除）。"""
+    if not config.CURRENT_ACCOUNT:
+        return jsonify({"error": "未登录"}), 401
+    body = request.get_json(silent=True) or {}
+    pin = str(body.get("pin", ""))
+    s = data._load_account_settings(config.CURRENT_ACCOUNT)
+    if pin:
+        err = _validate_pin(pin)
+        if err:
+            return jsonify({"error": err}), 400
+        s["pin_hash"] = generate_password_hash(pin)
+    else:
+        s.pop("pin_hash", None)
+    data.save_account_settings(config.CURRENT_ACCOUNT, s)
+    return jsonify({"has_pin": bool(s.get("pin_hash"))})
+
+
+@bp.delete("/<name>")
+def delete_account_api(name: str):
+    """注销账号：删整个账号目录（需账号 PIN + 前端防误触确认）。"""
+    meta = data.load_accounts_meta()
+    if name not in meta["accounts"]:
+        return jsonify({"error": "账号不存在"}), 404
+    if len(meta["accounts"]) <= 1:
+        return jsonify({"error": "至少保留一个账号"}), 400
+    if _has_account_pin(name):
+        body = request.get_json(silent=True) or {}
+        pin = str(body.get("pin", ""))
+        ph = data._load_account_settings(name).get("pin_hash")
+        if not check_password_hash(ph, pin):
+            return jsonify({"error": "PIN 不正确"}), 401
+
+    data.delete_account(name)
+    meta["accounts"] = [a for a in meta["accounts"] if a != name]
+    if meta.get("current") == name:
+        meta["current"] = meta["accounts"][0]
+    data.save_accounts_meta(meta)
+    if config.CURRENT_ACCOUNT == name:
+        config.CURRENT_ACCOUNT = ""
+    return jsonify({"ok": True})

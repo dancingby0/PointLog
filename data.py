@@ -14,6 +14,12 @@ from pathlib import Path
 # data/<档案名>/data.json
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
+# ---- v2.3 账号层 ----
+ACCOUNTS_FILE = "accounts.json"        # data/accounts.json 账号元数据
+DEFAULT_ACCOUNT = "我的账号"           # 旧数据迁移目标账号
+# 旧布局：data/global.json（资产）与 data/<档案>/（档案）
+_LEGACY_GLOBAL_FILE = "global.json"
+
 
 def validate_profile_name(profile: str) -> None:
     """校验档案名合法性（安全字符、防路径穿越）；非法抛 ValueError。"""
@@ -24,9 +30,16 @@ def validate_profile_name(profile: str) -> None:
 
 
 def profile_dir(profile: str) -> Path:
-    """返回某个档案对应的目录（不存在则创建）。"""
+    """返回某个档案对应的目录（不存在则创建）。
+
+    有当前账号时 → data/<当前账号>/<档案>/；无账号时 → data/<档案>/（兼容旧布局）。
+    """
     validate_profile_name(profile)
-    d = DATA_DIR / profile
+    import config
+    if config.CURRENT_ACCOUNT:
+        d = account_dir(config.CURRENT_ACCOUNT) / profile
+    else:
+        d = DATA_DIR / profile
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -65,16 +78,20 @@ def default_data() -> dict:
 
 
 def list_profiles() -> list[str]:
-    """列出 data/ 下的档案名（按名称排序）。"""
+    """列出档案（有当前账号 → 账号内档案；无账号 → 根目录旧档案），按名称排序。"""
+    import config
+    if config.CURRENT_ACCOUNT:
+        return account_profile_dirs(config.CURRENT_ACCOUNT)
     if not DATA_DIR.exists():
         return []
     names = [p.name for p in DATA_DIR.iterdir()
-             if p.is_dir() and not p.name.startswith(".") and not p.name == "__pycache__"]
+             if p.is_dir() and not p.name.startswith(".") and not p.name == "__pycache__"
+             and p.name != _LEGACY_GLOBAL_FILE]  # 无账号时排除非档案目录
     return sorted(names)
 
 
 def settings_path(profile: str) -> Path:
-    """档案级设置文件（PIN 等），独立于 data.json。"""
+    """档案级设置文件（PIN 等），独立于 data.json，随档案所在层。"""
     return profile_dir(profile) / "settings.json"
 
 
@@ -147,12 +164,15 @@ def new_id() -> str:
     return str(int(time.time() * 1000))
 
 
-# ---------- 个人级（全局共享）数据：data/global.json ----------
-# 与档案隔离的"个人级"存储：资产标签池、账户、收支等（不属于任何档案，切换档案不影响）。
+# ---------- 资产数据：账号级（v2.3） ----------
+# 有当前账号时存 data/<账号>/assets.json；无当前账号时用旧 data/global.json（兼容/迁移期）。
 
 
 def global_path() -> Path:
-    return DATA_DIR / "global.json"
+    import config
+    if config.CURRENT_ACCOUNT:
+        return account_dir(config.CURRENT_ACCOUNT) / "assets.json"
+    return DATA_DIR / _LEGACY_GLOBAL_FILE
 
 
 def default_global() -> dict:
@@ -194,3 +214,207 @@ def save_global(g: dict) -> None:
         f.flush()
         os.fsync(f.fileno())
     tmp.replace(path)
+# ---------- v2.3 本地账号层 ----------
+
+def validate_account_name(name: str) -> None:
+    """校验账号名合法性（同档案名规则，分隔符等禁止）。"""
+    if not name:
+        raise ValueError("账号名不能为空")
+    if any(c in name for c in '\\/:*?"<>|') or name in (".", ".."):
+        raise ValueError(f"非法账号名: {name!r}")
+
+
+def accounts_path() -> Path:
+    return DATA_DIR / ACCOUNTS_FILE
+
+
+def default_accounts_metadata() -> dict:
+    return {"accounts": [], "current": "", "auto_login": False}
+
+
+def load_accounts_meta() -> dict:
+    """读取账号元数据；缺失返回默认 + 触发一次性旧数据迁移。"""
+    path = accounts_path()
+    if not path.exists():
+        meta = default_accounts_metadata()
+        _migrate_legacy(meta)   # 首次启动：把旧 v1/v2 数据并入首个账号
+        return meta
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        meta = default_accounts_metadata()
+    meta.setdefault("accounts", [])
+    meta.setdefault("current", "")
+    meta.setdefault("auto_login", False)
+    return meta
+
+
+def save_accounts_meta(meta: dict) -> None:
+    path = accounts_path()
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
+
+
+def account_dir(name: str) -> Path:
+    validate_account_name(name)
+    d = DATA_DIR / name
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def list_accounts() -> list:
+    """返回账号列表 [{name, has_pin, auto_login(bool = 当前账号)}]。"""
+    meta = load_accounts_meta()
+    out = []
+    for name in meta["accounts"]:
+        out.append({
+            "name": name,
+            "has_pin": bool(_load_account_settings(name).get("pin_hash")),
+            "auto_login": meta.get("auto_login", False) and name == meta.get("current"),
+        })
+    return out
+
+
+def _load_account_settings(name: str) -> dict:
+    path = account_dir(name) / "settings.json"
+    if not path.exists():
+        return {}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            s = json.load(f)
+        return s if isinstance(s, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_account_settings(name: str, settings: dict) -> None:
+    path = account_dir(name) / "settings.json"
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
+
+
+def create_account(name: str) -> None:
+    """新建账号（内置一个默认档案，保证有日记可写）。"""
+    validate_account_name(name)
+    meta = load_accounts_meta()
+    if name in meta["accounts"]:
+        raise ValueError("账号已存在")
+    account_dir(name)                     # 建目录
+    ensure_profile(name, "默认")          # 建默认档案
+    meta["accounts"].append(name)
+    if not meta.get("current"):
+        meta["current"] = name
+    save_accounts_meta(meta)
+
+
+def ensure_profile(account: str, profile: str) -> Path:
+    """在账号下建档案目录。"""
+    validate_profile_name(profile)
+    d = account_dir(account) / profile
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def account_profile_dirs(account: str) -> list:
+    """某账号下的档案名列表。"""
+    base = account_dir(account)
+    if not base.exists():
+        return []
+    return sorted(p.name for p in base.iterdir()
+                  if p.is_dir() and p.name != "assets" and not p.name.startswith("."))
+
+
+def account_assets_path(account: str) -> Path:
+    return account_dir(account) / "assets.json"
+
+
+def load_account_assets(account: str) -> dict:
+    """读取某账号的资产；缺失返回空结构。"""
+    path = account_assets_path(account)
+    if not path.exists():
+        return default_global()   # 复用 default_global 结构
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            g = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return default_global()
+    base = default_global()
+    for k in base:
+        g.setdefault(k, base[k])
+    return g
+
+
+def save_account_assets(account: str, g: dict) -> None:
+    path = account_assets_path(account)
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(g, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
+
+
+def delete_account(name: str) -> None:
+    """注销账号：删除账号目录。"""
+    validate_account_name(name)
+    d = DATA_DIR / name
+    if d.is_dir():
+        shutil.rmtree(d)
+
+
+def _migrate_legacy(meta: dict) -> None:
+    """旧布局迁移：data/<档案>/* 与 data/global.json → 首个账号（我的账号）。
+
+    仅在没有任何账号数据时执行一次。
+    """
+    # 已存在账号则跳过
+    if meta["accounts"]:
+        return
+    # 检测旧默认档案或旧 global.json 是否存在于根 data/
+    legacy_profiles = [p.name for p in DATA_DIR.iterdir()
+                       if p.is_dir() and p.name != DEFAULT_ACCOUNT
+                       and not p.name.startswith(".") and p.name != "__pycache__"]
+    legacy_global = (DATA_DIR / _LEGACY_GLOBAL_FILE).exists()
+
+    if not legacy_profiles and not legacy_global:
+        return
+
+    # 建账号
+    account_dir(DEFAULT_ACCOUNT)
+
+    # 迁移档案：旧 data/<档案> → data/<账号>/<档案>
+    for p in legacy_profiles:
+        src = DATA_DIR / p
+        if (DATA_DIR / DEFAULT_ACCOUNT / p).exists():
+            continue
+        src.rename(DATA_DIR / DEFAULT_ACCOUNT / p)
+
+    # 迁移资产：数据/global.json → data/<账号>/assets.json
+    if legacy_global:
+        g = (DATA_DIR / _LEGACY_GLOBAL_FILE)
+        try:
+            with g.open("r", encoding="utf-8") as f:
+                data_g = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            data_g = default_global()
+        base = default_global()
+        for k in base:
+            data_g.setdefault(k, base[k])
+        save_account_assets(DEFAULT_ACCOUNT, data_g)
+        try:
+            g.unlink()
+        except OSError:
+            pass
+
+    meta["accounts"] = [DEFAULT_ACCOUNT]
+    meta["current"] = DEFAULT_ACCOUNT
+    save_accounts_meta(meta)
