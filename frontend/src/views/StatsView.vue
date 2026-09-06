@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted } from "vue";
 import EChart from "../components/EChart.vue";
-import { state, loadStatsSummary, loadStatsTrend } from "../store";
+import { state, loadStatsSummary, loadStatsDist, loadStatsTrend } from "../store";
 
 const RANGES = [
   { key: "week", label: "本周" },
@@ -13,6 +13,7 @@ const RANGES = [
 async function changeRange(r) {
   state.statsRange = r;
   await loadStatsSummary();
+  await loadStatsDist();
 }
 
 const s = computed(() => state.statsSummary);
@@ -57,8 +58,64 @@ const trendOption = computed(() => {
   };
 });
 
+// 标签占比（环形）
+const tagOption = computed(() => {
+  const tags = state.statsDist?.tags || [];
+  const palette = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899", "#84cc16"];
+  return {
+    tooltip: { trigger: "item", formatter: "{b}: {c} 点 ({d}%)" },
+    legend: { type: "scroll", bottom: 0, textStyle: { fontSize: 11 } },
+    series: [{
+      name: "类别点数", type: "pie", radius: ["38%", "65%"],
+      center: ["50%", "45%"],
+      avoidLabelOverlap: true,
+      itemStyle: { borderRadius: 4, borderColor: "#fff", borderWidth: 1 },
+      label: { show: false },
+      emphasis: { label: { show: true, fontSize: 13, fontWeight: "bold" } },
+      data: tags.map((t, i) => ({
+        name: t.tag, value: t.points,
+        itemStyle: { color: palette[i % palette.length] },
+      })),
+    }],
+    title: { text: tags.length === 0 ? "暂无带标签的记录" : "", left: "center", top: "middle", textStyle: { fontSize: 12, color: "#aaa" } },
+  };
+});
+
+// 星期分布（条形）
+const weekdayOption = computed(() => {
+  const wd = state.statsDist?.weekdays || [];
+  return {
+    tooltip: { trigger: "axis" },
+    grid: { left: 40, right: 12, top: 10, bottom: 24 },
+    xAxis: { type: "category", data: wd.map((x) => x.label) },
+    yAxis: { type: "value", minInterval: 1 },
+    series: [{
+      name: "点数", type: "bar", barWidth: "55%",
+      data: wd.map((x) => x.points),
+      itemStyle: { color: "#10b981", borderRadius: [3, 3, 0, 0] },
+    }],
+  };
+});
+
+// 时段分布（条形）
+const periodOption = computed(() => {
+  const pd = state.statsDist?.periods || [];
+  return {
+    tooltip: { trigger: "axis" },
+    grid: { left: 40, right: 12, top: 10, bottom: 24 },
+    xAxis: { type: "category", data: pd.map((x) => x.label) },
+    yAxis: { type: "value", minInterval: 1 },
+    series: [{
+      name: "点数", type: "bar", barWidth: "50%",
+      data: pd.map((x) => x.points),
+      itemStyle: { color: "#f59e0b", borderRadius: [3, 3, 0, 0] },
+    }],
+  };
+});
+
 onMounted(() => {
   loadStatsSummary();
+  loadStatsDist();
   loadStatsTrend();
 });
 </script>
@@ -107,6 +164,28 @@ onMounted(() => {
         </div>
         <p class="muted" style="margin-top:10px">期间写了 {{ s.notes_days }} 天感想。</p>
       </section>
+
+      <!-- 结构与规律 -->
+      <section class="card">
+        <div class="card-head">
+          <h2>类别占比</h2>
+          <span class="muted">带标签的打卡点数分布</span>
+        </div>
+        <div class="dist-chart">
+          <EChart :option="tagOption" />
+        </div>
+      </section>
+
+      <div class="dist-row">
+        <section class="card">
+          <div class="card-head"><h2>星期分布</h2></div>
+          <div class="dist-chart-sm"><EChart :option="weekdayOption" /></div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>时段分布</h2></div>
+          <div class="dist-chart-sm"><EChart :option="periodOption" /></div>
+        </section>
+      </div>
 
       <section class="card">
         <div class="card-head">

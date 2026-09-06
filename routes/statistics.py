@@ -139,3 +139,86 @@ def trend():
             "notes_days": note_days,
         })
     return jsonify(out)
+
+
+# 时段分桶（按打卡时刻的小时）
+PERIOD_BUCKETS = [
+    ("清晨", (5, 12)),     # 5:00–11:59
+    ("下午", (12, 18)),    # 12:00–17:59
+    ("晚上", (18, 23)),    # 18:00–22:59
+    ("深夜", (23, 5)),     # 23:00–4:59（跨零点）
+]
+
+
+def _period_label(hour: int) -> str:
+    for label, (lo, hi) in PERIOD_BUCKETS:
+        if lo < hi:
+            if lo <= hour < hi:
+                return label
+        else:  # 跨零点：23–5
+            if hour >= lo or hour < hi:
+                return label
+    return "深夜"
+
+
+WEEKDAY_ORDER = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+
+@bp.get("/distribution")
+def distribution():
+    """结构与规律分布：标签占比 / 星期分布 / 时段分布。
+
+    GET /api/stats/distribution?range=week|month|year|all
+    """
+    try:
+        range_name = request.args.get("range", "month")
+        now = dt.datetime.now().astimezone()
+        today = date_of(now)
+        start, end = _parse_range(range_name, today)
+    except ValueError:
+        return jsonify({"error": "range 应为 week/month/year/all"}), 400
+
+    d = data.load(config.CURRENT_PROFILE)
+
+    # 统计范围内逐条打卡（保留时刻与类别）
+    tag_points = {}       # tag -> {points, count}
+    weekday_points = {}   # 周几 -> points
+    period_points = {}    # period -> points
+
+    entries = d.get("entries", [])
+    for e in entries:
+        try:
+            t = parse_ts(e["ts"])
+        except (ValueError, TypeError):
+            continue
+        day = date_of(t)
+        if not (start <= day <= end):
+            continue
+        pts = int(e.get("points", 0))
+
+        # 时段（按打卡时刻的小时分桶）
+        period_points[_period_label(t.hour)] = period_points.get(_period_label(t.hour), 0) + pts
+
+        # 星期分布：按点数累计（真实反映投入量）
+        wd = WEEKDAY_ORDER[day.weekday()]
+        weekday_points[wd] = weekday_points.get(wd, 0) + pts
+
+        # 类别标签（v1 category 可能是文本）
+        cat = str(e.get("category") or "").strip()
+        if cat:
+            tag_points.setdefault(cat, {"points": 0, "count": 0})
+            tag_points[cat]["points"] += pts
+            tag_points[cat]["count"] += 1
+
+    tags = [{"tag": k, **v} for k, v in sorted(tag_points.items(),
+                                               key=lambda kv: kv[1]["points"], reverse=True)]
+    weekdays = [{"label": w, "points": weekday_points.get(w, 0)} for w in WEEKDAY_ORDER]
+    periods = [{"label": l, "points": period_points.get(l, 0)}
+               for l, _ in PERIOD_BUCKETS]
+
+    return jsonify({
+        "range": range_name,
+        "tags": tags,
+        "weekdays": weekdays,
+        "periods": periods,
+    })

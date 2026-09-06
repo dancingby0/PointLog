@@ -64,6 +64,36 @@ class SummaryApiTest(ApiTestCase):
         r = self.client.get("/api/stats/trend?months=999")
         self.assertEqual(len(r.get_json()), 24)
 
+    def test_distribution(self):
+        today = date_of(dt.datetime.now().astimezone())
+        # 今天上午打 3 点（学习）、下午打 2 点（运动）
+        self.client.post("/api/entries", json={
+            "content": "学习", "points": 3, "category": "学习",
+            "ts": dt.datetime.combine(today, dt.time(10, 0)).astimezone().isoformat(),
+        })
+        self.client.post("/api/entries", json={
+            "content": "运动", "points": 2, "category": "运动",
+            "ts": dt.datetime.combine(today, dt.time(15, 0)).astimezone().isoformat(),
+        })
+        r = self.client.get("/api/stats/distribution?range=month")
+        body = r.get_json()
+        self.assertEqual(r.status_code, 200)
+        # 标签占比：学习 3 分排前
+        tags = {t["tag"]: t for t in body["tags"]}
+        self.assertEqual(tags["学习"]["points"], 3)
+        self.assertEqual(tags["运动"]["points"], 2)
+        # 星期：今天所在星期有 5 点
+        wd = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][today.weekday()]
+        self.assertEqual(next(x for x in body["weekdays"] if x["label"] == wd)["points"], 5)
+        # 时段：10点→清晨，15点→下午
+        periods = {p["label"]: p["points"] for p in body["periods"]}
+        self.assertEqual(periods.get("清晨"), 3)
+        self.assertEqual(periods.get("下午"), 2)
+
+    def test_distribution_bad_range(self):
+        r = self.client.get("/api/stats/distribution?range=xx")
+        self.assertEqual(r.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
