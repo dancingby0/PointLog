@@ -1,5 +1,6 @@
 """点数线统计纯函数测试：stats.py 的 percentile 与 calc_baseline。"""
 
+import datetime as dt
 import unittest
 
 import stats
@@ -52,6 +53,47 @@ class BaselineTest(unittest.TestCase):
         self.assertEqual(r["active_days"], 2)
         self.assertEqual(r["method"], "direct")
         self.assertEqual(r["baseline"], 5.0)
+
+
+class StreakTest(unittest.TestCase):
+    def test_empty(self):
+        self.assertEqual(stats.calc_streaks(set()), {"current_streak": 0, "longest_streak": 0})
+
+    def test_current_extends_from_today(self):
+        today = dt.date.today()
+        days = {today, today - dt.timedelta(days=1), today - dt.timedelta(days=2)}
+        r = stats.calc_streaks(days)
+        self.assertEqual(r["current_streak"], 3)
+        self.assertEqual(r["longest_streak"], 3)
+
+    def test_today_missing_counts_from_yesterday(self):
+        """今天还没打卡不算断：从昨天往前数。"""
+        today = dt.date.today()
+        yesterday = today - dt.timedelta(days=1)
+        days = {yesterday, yesterday - dt.timedelta(days=1), yesterday - dt.timedelta(days=2)}
+        r = stats.calc_streaks(days)
+        self.assertEqual(r["current_streak"], 3)
+
+    def test_broken_streak(self):
+        """昨天没打 → current 归 0；longest 记录历史最长。"""
+        today = dt.date.today()
+        d1, d2 = today - dt.timedelta(days=4), today - dt.timedelta(days=3)
+        d3, d4 = today - dt.timedelta(days=2), today - dt.timedelta(days=1)
+        # 昨天(d1? 不)——构造：前天没打，今天打了(只1)
+        days = {d1, d2, d3, today}   # 前天 d3? 不，明确：{今天, 4天前,5天前}
+        # 简化：今天单独 + 更早两连
+        days2 = {today, today - dt.timedelta(days=5), today - dt.timedelta(days=6)}
+        r = stats.calc_streaks(days2)
+        self.assertEqual(r["current_streak"], 1)
+        self.assertEqual(r["longest_streak"], 2)
+
+    def test_filter_and_summarize(self):
+        day_points = {dt.date(2026, 9, 1): 3, dt.date(2026, 9, 5): 2, dt.date(2026, 8, 20): 5}
+        cut = stats.filter_day_points(day_points, dt.date(2026, 9, 1), dt.date(2026, 9, 30))
+        self.assertEqual(set(cut.keys()), {dt.date(2026, 9, 1), dt.date(2026, 9, 5)})
+        s = stats.summarize_day_points(cut)
+        self.assertEqual(s["total_days"], 2)
+        self.assertEqual(s["period_points"], 5)
 
 
 if __name__ == "__main__":

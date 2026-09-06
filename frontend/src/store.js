@@ -18,6 +18,8 @@ export const state = reactive({
   accounts: [],           // 账户列表
   totalAssets: 0,         // 个人总资产
   txs: [],                // 流水列表
+  statsSummary: null,     // 统计：坚持与概况
+  statsRange: "month",    // 统计时间范围
   editingId: null,        // 正在编辑的记录 id
   form: { content: "", points: 1, category: "", ts: "" },
   noteDraft: "",          // 感想草稿
@@ -753,5 +755,19 @@ export async function loadAssetTags() {
 
 export async function refreshAssets(accountId = "") {
   await Promise.all([loadAccounts(), loadTxs(accountId), loadAssetTags()]);
+}
+
+
+// ================= 统计 =================
+
+export async function loadStatsSummary() {
+  try {
+    const res = await fetch(`/api/stats/summary?range=${state.statsRange}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载统计失败");
+    state.statsSummary = data;
+  } catch (err) {
+    console.error(err);
+  }
 }
 

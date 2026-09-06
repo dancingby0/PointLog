@@ -432,6 +432,26 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tx-amount.income { color: #15803d; }
 .tx-time { color: var(--muted); font-size: 12px; }
 
+/* ---- v2.2 统计 ---- */
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.range-switch { display: flex; gap: 6px; }
+.range-switch button {
+  border: 1px solid var(--border); background: #fff; border-radius: 999px;
+  padding: 5px 14px; cursor: pointer; font-size: 13px; color: var(--muted);
+}
+.range-switch button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; text-align: center; }
+.stat-num { font-size: 28px; font-weight: 800; }
+.stat-label { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.stat-card.accent .stat-num { color: var(--accent); }
+.stat-card.fire .stat-num { color: #ea580c; }
+.streak-cells { display: flex; gap: 4px; flex-wrap: wrap; }
+.scell { width: 14px; height: 14px; border-radius: 3px; background: #eef0f3; }
+.scell.fill { background: #34d399; }
+.scell.today { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+
 
 
 /* ---- 贡献日历（GitHub 风格热力图） ---- */
