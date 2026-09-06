@@ -212,11 +212,40 @@ createApp({
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "切换失败");
-        // 切换成功后整体刷新（档案数据全变了）
-        location.reload();
+        // 就地切换到新档案：重置视图数据后重新加载。
+        // 注意：不能 location.reload() —— 否则新档案若有 PIN，
+        // 刷新后 init() 会再次弹锁屏，导致要输两次 PIN。
+        this.resetForProfileChange();
+        await this.loadProfiles();
+        await this.loadAll();
       } catch (err) {
         this.dialogError = err.message;
       }
+    },
+
+    // 切换档案前清空所有旧档案的视图状态
+    resetForProfileChange() {
+      this.dialog = null;
+      this.pinInput = "";
+      this.dialogError = "";
+      this.newProfileName = "";
+      this.entries = [];
+      this.dayPoints = 0;
+      this.selectedDay = "";
+      this.days = [];
+      this.calendarDays = [];
+      this.calendarYear = 0;
+      this.jumpTo = "";
+      this.editingId = null;
+      this.form = { content: "", points: 1, category: "", ts: "" };
+      this.noteDraft = "";
+      this.hasNote = false;
+      this.memos = [];
+      this.memoDraft = "";
+      this.mainGoal = "";
+      this.goalDraft = "";
+      this.goalEditing = false;
+      this.line = null;
     },
 
     // 新建档案
