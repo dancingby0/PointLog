@@ -1,8 +1,18 @@
+<script setup>
+import { onMounted } from "vue";
+import AccountCard from "../components/AccountCard.vue";
+import TxForm from "../components/TxForm.vue";
+import TxList from "../components/TxList.vue";
+import { refreshAssets } from "../store";
+
+onMounted(() => refreshAssets());
+</script>
+
 <template>
   <div class="views">
-    <section class="card">
-      <h2>资产</h2>
-      <p class="muted">账户余额总览、记收支/转账功能将在 v2.1 落地。</p>
-    </section>
+    <h1 style="margin-bottom:12px">资产</h1>
+    <AccountCard />
+    <TxForm />
+    <TxList />
   </div>
 </template>

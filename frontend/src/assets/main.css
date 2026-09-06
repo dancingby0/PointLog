@@ -388,6 +388,51 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 .tag-x:hover { color: var(--danger); }
 
+/* ---- v2.1 资产 ---- */
+.total-assets { font-size: 34px; font-weight: 800; margin: 4px 0 16px; color: var(--text); }
+.acct-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.acct-form input, .acct-form select { width: auto; margin: 0; }
+.acct-list { list-style: none; margin: 0; padding: 0; }
+.acct-item { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.acct-item:last-child { border-bottom: 0; }
+.acct-main { display: flex; align-items: center; gap: 10px; }
+.acct-bal { margin-left: auto; font-weight: 700; }
+.acct-bal.neg { color: var(--danger); }
+.acct-ops { display: flex; gap: 6px; margin-top: 6px; }
+.acct-inline { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.acct-inline input { width: auto; margin: 0; flex: 1; min-width: 120px; }
+
+.tx-type-switch { display: flex; gap: 6px; margin-bottom: 12px; }
+.tx-type-switch button {
+  border: 1px solid var(--border); background: #fff; border-radius: 8px;
+  padding: 6px 16px; cursor: pointer; color: var(--text);
+}
+.tx-type-switch button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tx-field { display: flex; gap: 12px; flex-wrap: wrap; }
+.tx-field label { flex: 1; min-width: 140px; }
+
+.tx-list { list-style: none; margin: 0; padding: 0; }
+.tx-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px;
+}
+.tx-item:last-child { border-bottom: 0; }
+.tx-main { flex: 1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tx-type {
+  font-size: 12px; border-radius: 6px; padding: 1px 8px; background: #eef0f3; color: var(--muted);
+}
+.tx-type.expense { background: #fee2e2; color: var(--danger); }
+.tx-type.income { background: #dcfce7; color: #15803d; }
+.tx-type.transfer { background: #e0e7ff; color: #4338ca; }
+.tx-desc { color: var(--text); }
+.tx-tag { background: #eff6ff; color: #1d4ed8; font-size: 12px; border-radius: 999px; padding: 0 8px; }
+.tx-side { display: flex; flex-direction: column; align-items: flex-end; }
+.tx-amount { font-weight: 700; }
+.tx-amount.expense { color: var(--danger); }
+.tx-amount.income { color: #15803d; }
+.tx-time { color: var(--muted); font-size: 12px; }
+
+
 
 /* ---- 贡献日历（GitHub 风格热力图） ---- */
 .card-head {

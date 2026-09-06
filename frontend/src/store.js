@@ -14,6 +14,10 @@ export const state = reactive({
   calendarDays: [],       // 贡献日历数据
   calendarYear: 0,        // 贡献日历当前年份（0=今年）
   diaryTags: [],          // 日记标签池（当前档案）
+  assetTags: [],          // 资产标签池（个人级）
+  accounts: [],           // 账户列表
+  totalAssets: 0,         // 个人总资产
+  txs: [],                // 流水列表
   editingId: null,        // 正在编辑的记录 id
   form: { content: "", points: 1, category: "", ts: "" },
   noteDraft: "",          // 感想草稿
@@ -706,5 +710,48 @@ export async function saveGoal() {
   } catch (err) {
     alert("保存失败：" + err.message);
   }
+}
+
+
+// ================= 资产（个人级） =================
+
+export async function loadAccounts() {
+  try {
+    const res = await fetch("/api/accounts");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载账户失败");
+    state.accounts = data.accounts;
+    state.totalAssets = data.total;
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function loadTxs(accountId = "") {
+  try {
+    const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
+    const res = await fetch(`/api/transactions${q}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载流水失败");
+    state.txs = data.transactions;
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function loadAssetTags() {
+  try {
+    const res = await fetch("/api/tags/asset");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载资产标签失败");
+    state.assetTags = data.tags;
+  } catch (err) {
+    console.error(err);
+    state.assetTags = [];
+  }
+}
+
+export async function refreshAssets(accountId = "") {
+  await Promise.all([loadAccounts(), loadTxs(accountId), loadAssetTags()]);
 }
 

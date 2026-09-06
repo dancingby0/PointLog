@@ -9,9 +9,10 @@
 - routes/profiles.py 本地档案 + PIN 锁 API
 - routes/export.py   数据导出 API
 - routes/tags.py     标签池 API（日记档案级 + 资产个人级）
+- routes/assets.py   资产 API（账户/收支/转账/余额校准，个人级）
 """
 
-from . import days, entries, export, memos, notes, pages, profiles, tags
+from . import assets, days, entries, export, memos, notes, pages, profiles, tags
 
 
 def register_blueprints(app):
@@ -23,3 +24,4 @@ def register_blueprints(app):
     app.register_blueprint(profiles.bp)
     app.register_blueprint(export.bp)
     app.register_blueprint(tags.bp)
+    app.register_blueprint(assets.bp)
