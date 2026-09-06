@@ -52,6 +52,7 @@ frontend/
 
 ## 状态
 
-✅ **v1 已完工**（2026-09-05）— 全部验收项通过，详见 `docs/requirements.md`。前端已迁移到 Vite + Vue SFC。
+✅ **v1 已完工**（2026-09-05）— 验收文档见 `docs/requirements-v1.md`。
+🚧 **v2 需求确定中** — 标签池 / 资产随性记账 / 统计仪表盘 / 设置页，见 `docs/requirements-v2.md`。
 
 ![status](https://img.shields.io/badge/status-v1%20done-green)
