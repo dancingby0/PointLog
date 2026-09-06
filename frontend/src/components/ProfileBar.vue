@@ -6,27 +6,20 @@ import {
   openRenameProfile,
   openDeleteProfile,
   openNewProfile,
-  openPinSetup,
-  doLock,
-  isLocked,
 } from "../store";
 </script>
 
 <template>
   <div class="profile-bar">
     <span>📁 档案：</span>
-    <strong class="pf-name">{{ state.currentProfile }}{{ state.currentHasPin ? ' 🔒' : '' }}</strong>
+    <strong class="pf-name">{{ state.currentProfile }}</strong>
     <select :value="state.currentProfile" @change="onProfileSelect" title="切换档案">
-      <option v-for="p in state.profiles" :key="p.name" :value="p.name">
-        {{ p.name }}{{ p.has_pin ? '（有锁）' : '' }}
-      </option>
+      <option v-for="p in state.profiles" :key="p.name" :value="p.name">{{ p.name }}</option>
     </select>
     <span class="spacer"></span>
     <button type="button" class="ghost" @click="exportData" title="导出当前档案全部数据为 JSON 文件">导出 JSON</button>
     <button type="button" class="ghost" @click="openRenameProfile" title="重命名当前档案">✏️ 改名</button>
     <button type="button" class="ghost danger" @click="openDeleteProfile" title="删除当前档案">🗑 删除</button>
     <button type="button" class="ghost" @click="openNewProfile">＋新建</button>
-    <button type="button" class="ghost" @click="openPinSetup">{{ state.currentHasPin ? '改 PIN' : '设 PIN' }}</button>
-    <button type="button" class="ghost" v-if="state.currentHasPin && !isLocked()" @click="doLock">锁定</button>
   </div>
 </template>

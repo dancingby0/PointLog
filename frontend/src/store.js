@@ -33,22 +33,20 @@ export const state = reactive({
   mainGoal: "",
   goalDraft: "",
   goalEditing: false,
-  // 档案 + PIN
+  // 档案
   profiles: [],
   currentProfile: "",
-  currentHasPin: false,
   // 账号（v2.3）
   currentAccount: "",      // 当前本地账号名
   accountHasPin: false,    // 当前账号是否有锁
+  unlockedAccount: "",     // 免输窗口内账号名（服务端内存态）
   authAccounts: [],        // 账号列表 [{name, has_pin, auto_login}]
   autoLogin: false,        // 自动登录开关
   dialog: null,           // {mode, tip, code?, target?}
-  pinInput: "",
   newProfileName: "",
   renameName: "",
   codeInput: "",
   dialogError: "",
-  lastActivity: Date.now(),
 });
 
 // ---------- 小工具（组件共用） ----------
@@ -73,17 +71,12 @@ export function lineText() {
 export function dialogTitle() {
   if (!state.dialog) return "";
   switch (state.dialog.mode) {
-    case "lock": return "🔒 已锁定";
-    case "switch": return `切换到「${state.dialog.target}」`;
-    case "pinSetup": return state.currentHasPin ? "修改 PIN" : "设置 PIN";
     case "new": return "新建档案";
     case "rename": return "重命名当前档案";
     case "delete": return "⚠️ 删除当前档案";
     default: return "";
   }
 }
-
-export const isLocked = () => !!(state.dialog && state.dialog.mode === "lock");
 
 export const currentYear = () => new Date().getFullYear();
 
@@ -101,6 +94,7 @@ export async function initAuth() {
     state.authAccounts = data.accounts;
     state.currentAccount = data.logged_in || "";
     state.autoLogin = data.auto_login;
+    state.unlockedAccount = data.unlocked || "";
     if (data.logged_in) {
       const cur = state.authAccounts.find((a) => a.name === data.logged_in);
       state.accountHasPin = !!(cur && cur.has_pin);
@@ -121,7 +115,6 @@ export async function loginAccount(name, pin = "") {
     if (!res.ok) throw new Error(data.error || "登录失败");
     state.currentAccount = data.account;
     state.currentProfile = data.profile;
-    state.currentHasPin = false;
     await initAuth();
     resetForProfileChange();
     await loadProfiles();
@@ -214,7 +207,7 @@ export async function setAccountPin(pin) {
   }
 }
 
-// ================= 档案 + PIN =================
+// ================= 档案 =================
 
 export async function loadProfiles() {
   try {
@@ -223,22 +216,13 @@ export async function loadProfiles() {
     if (!res.ok) throw new Error(data.error || "加载档案失败");
     state.profiles = data.profiles;
     state.currentProfile = data.current;
-    const cur = state.profiles.find((p) => p.name === data.current);
-    state.currentHasPin = !!(cur && cur.has_pin);
   } catch (err) {
     console.error(err);
   }
 }
 
-export function showLock(tip) {
-  state.dialog = { mode: "lock", tip };
-  state.pinInput = "";
-  state.dialogError = "";
-}
-
 export function resetForProfileChange() {
   state.dialog = null;
-  state.pinInput = "";
   state.dialogError = "";
   state.newProfileName = "";
   state.entries = [];
@@ -263,12 +247,12 @@ export function resetForProfileChange() {
   state.diaryTags = [];
 }
 
-export async function doSwitch(name, pin) {
+export async function doSwitch(name) {
   try {
     const res = await fetch("/api/profiles/switch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, pin }),
+      body: JSON.stringify({ name }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "切换失败");
@@ -283,14 +267,7 @@ export async function doSwitch(name, pin) {
 export async function onProfileSelect(ev) {
   const name = ev.target.value;
   if (name === state.currentProfile) return;
-  const target = state.profiles.find((p) => p.name === name);
-  if (target && target.has_pin) {
-    state.dialog = { mode: "switch", tip: `档案「${name}」已设 PIN，请输入后切换`, target: name };
-    state.pinInput = "";
-    state.dialogError = "";
-  } else {
-    await doSwitch(name, "");
-  }
+  await doSwitch(name);
 }
 
 export function openNewProfile() {
@@ -302,12 +279,9 @@ export function openNewProfile() {
 export function openRenameProfile() {
   state.dialog = {
     mode: "rename",
-    tip: state.currentHasPin
-      ? `给「${state.currentProfile}」起新名字（需输入 PIN 确认）`
-      : `给「${state.currentProfile}」起个新名字`,
+    tip: `给「${state.currentProfile}」起个新名字`,
   };
   state.renameName = state.currentProfile;
-  state.pinInput = "";
   state.dialogError = "";
 }
 
@@ -316,32 +290,13 @@ export function openDeleteProfile() {
   state.dialog = {
     mode: "delete",
     code,
-    tip: state.currentHasPin
-      ? `将永久删除「${state.currentProfile}」的所有数据（需输入验证码和 PIN）`
-      : `将永久删除「${state.currentProfile}」的所有数据，不可恢复！`,
+    tip: `将永久删除「${state.currentProfile}」的所有数据，不可恢复！`,
   };
   state.codeInput = "";
-  state.pinInput = "";
   state.dialogError = "";
-}
-
-export function openPinSetup() {
-  state.dialog = { mode: "pinSetup", tip: state.currentHasPin ? "输入新的 4~8 位数字 PIN" : "为当前档案设置 4~8 位数字 PIN" };
-  state.pinInput = "";
-  state.dialogError = "";
-}
-
-export function doLock() {
-  showLock("已锁定，输入 PIN 解锁");
-}
-
-export function clearPin() {
-  state.dialogError = "";
-  setPin("");
 }
 
 export function closeDialog() {
-  if (state.dialog && state.dialog.mode === "lock") return;
   state.dialog = null;
   state.dialogError = "";
 }
@@ -351,63 +306,10 @@ export function exportData() {
   window.location.href = "/api/export";
 }
 
-export function watchIdle() {
-  const touch = () => { state.lastActivity = Date.now(); };
-  ["mousemove", "keydown", "click", "scroll"].forEach((ev) =>
-    window.addEventListener(ev, touch, { passive: true })
-  );
-  window.setInterval(() => {
-    if (!state.currentHasPin || state.dialog) return;
-    if (Date.now() - state.lastActivity > 5 * 60 * 1000) {
-      showLock("已闲置 5 分钟，输入 PIN 解锁");
-    }
-  }, 30 * 1000);
-}
-
-
-
-async function setPin(pin) {
-  try {
-    const res = await fetch("/api/pin", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "保存失败");
-    state.currentHasPin = data.has_pin;
-    state.dialog = null;
-  } catch (err) {
-    state.dialogError = err.message;
-  }
-}
-
 export async function submitDialog() {
   const mode = state.dialog && state.dialog.mode;
   state.dialogError = "";
-  if (mode === "lock" || mode === "switch") {
-    const pin = state.pinInput.trim();
-    if (mode === "switch") {
-      await doSwitch(state.dialog.target, pin);
-    } else {
-      try {
-        const res = await fetch("/api/unlock", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "解锁失败");
-        state.dialog = null;
-        await loadAll();
-      } catch (err) {
-        state.dialogError = err.message;
-        state.pinInput = "";
-      }
-    }
-  } else if (mode === "pinSetup") {
-    await setPin(state.pinInput.trim());
-  } else if (mode === "new") {
+  if (mode === "new") {
     const name = state.newProfileName.trim();
     if (!name) { state.dialogError = "档案名不能为空"; return; }
     try {
@@ -419,7 +321,7 @@ export async function submitDialog() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "创建失败");
       state.dialog = null;
-      await doSwitch(name, "");
+      await doSwitch(name);
     } catch (err) {
       state.dialogError = err.message;
     }
@@ -430,7 +332,7 @@ export async function submitDialog() {
       const res = await fetch("/api/profiles/rename", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, pin: state.pinInput.trim() }),
+        body: JSON.stringify({ name }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "重命名失败");
@@ -449,7 +351,6 @@ export async function submitDialog() {
       const res = await fetch(`/api/profiles/${encodeURIComponent(state.currentProfile)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin: state.pinInput.trim() }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "删除失败");
@@ -463,11 +364,8 @@ export async function submitDialog() {
 
 async function refreshAfterProfileChange(newCurrent) {
   state.currentProfile = newCurrent;
-  state.currentHasPin = false;
   state.dialog = null;
   await loadProfiles();
-  const cur = state.profiles.find((p) => p.name === newCurrent);
-  state.currentHasPin = !!(cur && cur.has_pin);
   resetForProfileChange();
   await loadAll();
 }

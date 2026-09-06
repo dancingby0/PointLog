@@ -19,7 +19,8 @@ async function pick(account) {
   selected.value = account.name;
   pinInput.value = "";
   errMsg.value = "";
-  if (!account.has_pin) {
+  // 无账号 PIN 或该账号正处于免输窗口 → 免输直进（后端窗口内免校验）
+  if (!account.has_pin || state.unlockedAccount === account.name) {
     await doLogin(account.name, "");
   }
 }
@@ -81,8 +82,9 @@ async function cancelPick() {
       <ul v-else class="gate-accounts">
         <li v-for="a in state.authAccounts" :key="a.name" class="gate-acct" @click="pick(a)">
           <span class="gate-acct-name">{{ a.name }}</span>
-          <span class="gate-acct-lock" v-if="a.has_pin">🔒</span>
-          <span class="gate-acct-go" v-else>进入 →</span>
+          <span class="gate-acct-go" v-if="!a.has_pin">进入 →</span>
+          <span class="gate-acct-lock" v-else-if="state.unlockedAccount === a.name" title="10 分钟免输窗口内">🔓 进入 →</span>
+          <span class="gate-acct-lock" v-else>🔒</span>
         </li>
       </ul>
 

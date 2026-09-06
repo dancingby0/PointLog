@@ -1,4 +1,4 @@
-"""本地档案 + PIN 锁 API 测试。"""
+"""本地档案 API 测试（v2.3：档案锁已取消）。"""
 
 import unittest
 
@@ -6,7 +6,7 @@ from base import ApiTestCase
 
 
 class ProfilesApiTest(ApiTestCase):
-    """档案创建、列举、切换、PIN 设置与解锁、数据隔离。"""
+    """档案创建、列举、切换、数据隔离 + 旧 PIN 逻辑忽略。"""
 
     def setUp(self):
         super().setUp()
@@ -57,49 +57,29 @@ class ProfilesApiTest(ApiTestCase):
         self.assertEqual(len(body["entries"]), 1)
         self.assertEqual(body["entries"][0]["content"], "alpha数据")
 
-    def test_set_pin_and_unlock(self):
+    def test_legacy_pin_endpoints_disabled(self):
+        """v2.3：档案锁取消。/pin 与 /unlock 仅作兼容空壳。"""
         r = self.client.put("/api/pin", json={"pin": "1234"})
-        self.assertTrue(r.get_json()["has_pin"])
-        # 解锁正确
-        self.assertEqual(self.client.post("/api/unlock", json={"pin": "1234"}).status_code, 200)
-        # 解锁错误
-        self.assertEqual(self.client.post("/api/unlock", json={"pin": "0000"}).status_code, 401)
-        # PIN 规则：过短 / 非数字
-        self.assertEqual(self.client.put("/api/pin", json={"pin": "12"}).status_code, 400)
-        self.assertEqual(self.client.put("/api/pin", json={"pin": "abcd"}).status_code, 400)
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.get_json()["has_pin"])
+        # 解锁旧端点恒成功（不再校验）
+        self.assertEqual(self.client.post("/api/unlock", json={"pin": "0000"}).status_code, 200)
 
-    def test_pin_is_hashed_not_plaintext(self):
+    def test_legacy_profile_pin_data_ignored(self):
+        """旧 v1 数据若留有 pin_hash，切换/删除也不再用它拦截。"""
         import data
-        self.client.put("/api/pin", json={"pin": "1234"})
         settings = data.load_settings("alpha")
-        self.assertIn("pin_hash", settings)
-        self.assertNotIn("1234", settings["pin_hash"])
-
-    def test_switch_to_pin_protected_profile(self):
-        """给 alpha 设 PIN 后，从 beta 切回 alpha 必须输 PIN。"""
-        self.client.put("/api/pin", json={"pin": "5678"})
-        self._add_entry("alpha数据")
-        # 建 beta 并切过去
+        settings["pin_hash"] = "stale-legacy-hash"  # 模拟旧版遗留
+        data.save_settings("alpha", settings)
         self.client.post("/api/profiles", json={"name": "beta"})
         self.client.post("/api/profiles/switch", json={"name": "beta"})
-        # 无 PIN 切回 → 401
-        self.assertEqual(
-            self.client.post("/api/profiles/switch", json={"name": "alpha"}).status_code, 401)
-        # 错误 PIN → 401
-        self.assertEqual(
-            self.client.post("/api/profiles/switch", json={"name": "alpha", "pin": "0000"}).status_code, 401)
-        # 正确 PIN → 成功
-        r = self.client.post("/api/profiles/switch", json={"name": "alpha", "pin": "5678"})
+        # 切回原档案无需 PIN
+        r = self.client.post("/api/profiles/switch", json={"name": "alpha"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.get_json()["current"], "alpha")
-        body = self.client.get("/api/entries").get_json()
-        self.assertEqual(len(body["entries"]), 1)
-
-    def test_clear_pin(self):
-        self.client.put("/api/pin", json={"pin": "1234"})
-        self.assertFalse(self.client.put("/api/pin", json={"pin": ""}).get_json()["has_pin"])
-        # 清除后解锁不再需要 PIN
-        self.assertEqual(self.client.post("/api/unlock", json={"pin": ""}).status_code, 200)
+        # 删除无需 PIN
+        r = self.client.delete("/api/profiles/beta")
+        self.assertEqual(r.status_code, 200)
 
     def test_rename_current_profile(self):
         r = self.client.put("/api/profiles/rename", json={"name": "alpha2"})
@@ -118,17 +98,6 @@ class ProfilesApiTest(ApiTestCase):
         r = self.client.delete("/api/profiles/victim")
         self.assertEqual(r.status_code, 200, r.get_json())
         self.assertEqual(self.client.post("/api/profiles/switch", json={"name": "victim"}).status_code, 404)
-
-    def test_delete_requires_pin(self):
-        # 先建 secret，切过去给它设 PIN，再切回 alpha
-        self.client.post("/api/profiles", json={"name": "secret"})
-        self.client.post("/api/profiles/switch", json={"name": "secret"})
-        self.client.put("/api/pin", json={"pin": "1234"})
-        self.client.post("/api/profiles/switch", json={"name": "alpha"})
-        # 有 PIN 档案被删除需 PIN
-        self.assertEqual(self.client.delete("/api/profiles/secret").status_code, 401)
-        r = self.client.delete("/api/profiles/secret", json={"pin": "1234"})
-        self.assertEqual(r.status_code, 200)
 
     def test_delete_only_profile_rejected(self):
         # 只允许一个档案存在的场景：把 alpha 删到只剩一个前先造两个

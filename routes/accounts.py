@@ -1,7 +1,10 @@
 """本地账号 API：新建/登录/登出/注销/自动登录 + 账号 PIN。
 
-账号是 v2.3 新增顶层；档案与资产都挂账号下。账号间完全隔离。
+账号是 v2.3 顶层；档案与资产挂账号下，账号间完全隔离。
+账号锁为唯一总锁；解锁后 10 分钟（服务进程内存）免输账号 PIN。
 """
+
+import time
 
 from flask import Blueprint, jsonify, request
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -13,6 +16,7 @@ bp = Blueprint("accounts", __name__, url_prefix="/api/auth")
 
 PIN_MIN_LEN = 4
 PIN_MAX_LEN = 8
+UNLOCK_WINDOW_SEC = 10 * 60  # 10 分钟免输窗口
 
 
 def _validate_pin(pin: str):
@@ -27,6 +31,11 @@ def _has_account_pin(name: str) -> bool:
     return bool(data._load_account_settings(name).get("pin_hash"))
 
 
+def _is_unlocked(name: str) -> bool:
+    """该账号是否处于免输窗口内（窗口记所属账号，登出/切号不影响）。"""
+    return config.UNLOCKED_ACCOUNT == name and time.time() < config.UNLOCKED_UNTIL
+
+
 @bp.get("")
 def list_accounts_api():
     """账号列表 + 当前选中 + 自动登录标记。
@@ -38,17 +47,21 @@ def list_accounts_api():
     # 自动登录逻辑：仅当进程内未登录
     if not config.CURRENT_ACCOUNT and meta.get("auto_login") and meta.get("current"):
         remembered = meta["current"]
-        if remembered in meta["accounts"] and not _has_account_pin(remembered):
-            config.CURRENT_ACCOUNT = remembered
-            profs = data.account_profile_dirs(remembered)
-            config.CURRENT_PROFILE = profs[0] if profs else "default"
+        if remembered in meta["accounts"]:
+            # 有 PIN 的账号：仅当处于免输窗口内才自动登录
+            if not _has_account_pin(remembered) or _is_unlocked(remembered):
+                config.CURRENT_ACCOUNT = remembered
+                profs = data.account_profile_dirs(remembered)
+                config.CURRENT_PROFILE = profs[0] if profs else "default"
 
     accounts = data.list_accounts()
+    unlocked = config.UNLOCKED_ACCOUNT if time.time() < config.UNLOCKED_UNTIL else ""
     return jsonify({
         "accounts": accounts,
         "current": meta.get("current", ""),
         "auto_login": meta.get("auto_login", False),
         "logged_in": config.CURRENT_ACCOUNT,
+        "unlocked": unlocked,  # 免输窗口内账号（空串 = 无）
     })
 
 
@@ -87,20 +100,26 @@ def create_account_api():
 
 @bp.post("/login")
 def login_account_api():
-    """登录/进入账号：body {name, pin?}。设置 CURRENT_ACCOUNT，进入其首档案。"""
+    """登录/进入账号：body {name, pin?}。
+
+    账号有 PIN 时需要 PIN，除非当前账号正处于免输窗口。
+    登录成功后刷新免输窗口（now + 10min，进程内存）。
+    """
     body = request.get_json(silent=True) or {}
     name = str(body.get("name", ""))
     meta = data.load_accounts_meta()
     if name not in meta["accounts"]:
         return jsonify({"error": "账号不存在"}), 404
 
-    if _has_account_pin(name):
+    if _has_account_pin(name) and not _is_unlocked(name):
         pin = str(body.get("pin", ""))
         ph = data._load_account_settings(name).get("pin_hash")
         if not check_password_hash(ph, pin):
             return jsonify({"error": "PIN 不正确"}), 401
 
     config.CURRENT_ACCOUNT = name
+    config.UNLOCKED_ACCOUNT = name
+    config.UNLOCKED_UNTIL = time.time() + UNLOCK_WINDOW_SEC
     meta["current"] = name
     data.save_accounts_meta(meta)
 
@@ -112,7 +131,7 @@ def login_account_api():
 
 @bp.post("/logout")
 def logout_account_api():
-    """登出：清当前账号/档案。"""
+    """登出：清当前账号/档案（免输窗口保留，窗口内重进免输）。"""
     config.CURRENT_ACCOUNT = ""
     config.CURRENT_PROFILE = "default"
     return jsonify({"ok": True})
@@ -172,4 +191,7 @@ def delete_account_api(name: str):
     data.save_accounts_meta(meta)
     if config.CURRENT_ACCOUNT == name:
         config.CURRENT_ACCOUNT = ""
+    if config.UNLOCKED_ACCOUNT == name:  # 账号已删除，清其免输窗口
+        config.UNLOCKED_ACCOUNT = ""
+        config.UNLOCKED_UNTIL = 0.0
     return jsonify({"ok": True})

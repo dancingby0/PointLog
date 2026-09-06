@@ -1,8 +1,7 @@
 """本地账号 API 测试。"""
 
-import tempfile
+import time
 import unittest
-from pathlib import Path
 
 import config
 import data
@@ -10,16 +9,22 @@ from base import ApiTestCase
 
 
 class AccountsApiTest(ApiTestCase):
-    """账号创建、登录、隔离、PIN、登出、注销。"""
+    """账号创建、登录、隔离、PIN、免输窗口、登出、注销。"""
 
     def setUp(self):
         super().setUp()
         # 账号测试单独控制账号层状态
         self._old_acct = config.CURRENT_ACCOUNT
         config.CURRENT_ACCOUNT = ""
+        self._old_unlocked_acct = config.UNLOCKED_ACCOUNT
+        self._old_unlocked_until = config.UNLOCKED_UNTIL
+        config.UNLOCKED_ACCOUNT = ""
+        config.UNLOCKED_UNTIL = 0.0
 
     def tearDown(self):
         config.CURRENT_ACCOUNT = self._old_acct
+        config.UNLOCKED_ACCOUNT = self._old_unlocked_acct
+        config.UNLOCKED_UNTIL = self._old_unlocked_until
         super().tearDown()
 
     def _mk(self, name, pin=""):
@@ -62,6 +67,73 @@ class AccountsApiTest(ApiTestCase):
         self.assertEqual(r.status_code, 401)
         r = self.client.post("/api/auth/login", json={"name": "锁A", "pin": "1234"})
         self.assertEqual(r.status_code, 200)
+
+    def test_relogin_within_window_skips_pin(self):
+        """解锁后 10 分钟窗口内（进程内）登出再进免输。"""
+        self._mk("锁X", "1234")
+        r = self.client.post("/api/auth/login", json={"name": "锁X", "pin": "1234"})
+        self.assertEqual(r.status_code, 200)
+        self.assertGreater(config.UNLOCKED_UNTIL, time.time())
+        self.assertEqual(config.UNLOCKED_ACCOUNT, "锁X")
+        # 登出保留窗口 → 再进不带 PIN 也成功
+        self.client.post("/api/auth/logout")
+        r = self.client.post("/api/auth/login", json={"name": "锁X"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_window_expired_requires_pin_again(self):
+        """窗口失效（如服务重启，内存清零）后需重新输 PIN。"""
+        self._mk("锁Y", "1234")
+        self.client.post("/api/auth/login", json={"name": "锁Y", "pin": "1234"})
+        self.client.post("/api/auth/logout")
+        config.UNLOCKED_ACCOUNT = ""  # 模拟服务重启：内存态丢失
+        config.UNLOCKED_UNTIL = 0.0
+        r = self.client.post("/api/auth/login", json={"name": "锁Y"})
+        self.assertEqual(r.status_code, 401)
+        r = self.client.post("/api/auth/login", json={"name": "锁Y", "pin": "1234"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_get_auth_reports_unlocked_account(self):
+        """GET /api/auth 返回当前免输窗口所属账号，供前端免输直进。"""
+        self._mk("锁Z", "1234")
+        self.client.post("/api/auth/login", json={"name": "锁Z", "pin": "1234"})
+        body = self.client.get("/api/auth").get_json()
+        self.assertEqual(body["unlocked"], "锁Z")
+        # 登出后窗口仍在
+        self.client.post("/api/auth/logout")
+        body = self.client.get("/api/auth").get_json()
+        self.assertEqual(body["unlocked"], "锁Z")
+        # 窗口过期后为空
+        config.UNLOCKED_UNTIL = 0.0
+        body = self.client.get("/api/auth").get_json()
+        self.assertEqual(body["unlocked"], "")
+
+    def test_auto_login_with_pin_requires_window(self):
+        """自动登录开关下，设 PIN 账号仅在免输窗口内才自动登录。"""
+        self._mk("甲", "1234")
+        self.client.post("/api/auth/login", json={"name": "甲", "pin": "1234"})
+        self.client.post("/api/auth/set-auto-login", json={"enabled": True})
+        self.client.post("/api/auth/logout")
+        # 窗口内 → GET 自动登录进入
+        body = self.client.get("/api/auth").get_json()
+        self.assertEqual(body["logged_in"], "甲")
+        # 模拟重启：内存清零 → 有锁账号不再自动登录
+        config.CURRENT_ACCOUNT = ""
+        config.UNLOCKED_ACCOUNT = ""
+        config.UNLOCKED_UNTIL = 0.0
+        body = self.client.get("/api/auth").get_json()
+        self.assertEqual(body["logged_in"], "")
+
+    def test_logout_keeps_window_but_clears_session(self):
+        self._mk("备用账号")  # 至少保留两个账号才能注销
+        self._mk("锁W", "1234")
+        self.client.post("/api/auth/login", json={"name": "锁W", "pin": "1234"})
+        self.client.post("/api/auth/logout")
+        self.assertEqual(config.CURRENT_ACCOUNT, "")
+        # 免输窗口为内存会话级，账号注销后应清理
+        r = self.client.delete("/api/auth/锁W", json={"pin": "1234"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(config.UNLOCKED_ACCOUNT, "")
+        self.assertEqual(config.UNLOCKED_UNTIL, 0.0)
 
     def test_set_account_pin(self):
         self._mk("账号C")

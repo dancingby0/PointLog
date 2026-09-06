@@ -6,7 +6,7 @@
 - routes/days.py     日期总览与贡献日历 API
 - routes/notes.py    每日感想 API
 - routes/memos.py    备忘录 + 置顶主目标 API
-- routes/profiles.py 本地档案 + PIN 锁 API
+- routes/profiles.py 本地档案 API（账号内，无档案锁）
 - routes/export.py   数据导出 API
 - routes/tags.py     标签池 API（日记档案级 + 资产个人级）
 - routes/assets.py   资产 API（账户/收支/转账/余额校准，个人级）
