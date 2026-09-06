@@ -94,6 +94,29 @@ class SummaryApiTest(ApiTestCase):
         r = self.client.get("/api/stats/distribution?range=xx")
         self.assertEqual(r.status_code, 400)
 
+    def test_asset_trend(self):
+        """收支趋势：income/expense 按月聚合，转账不计。"""
+        import data as data_mod
+        now = dt.datetime.now().astimezone()
+        g = data_mod.load_global()
+        this_m = now.strftime("%Y-%m")
+        # 本月：收入 10000 分(100元)，支出 2350 分(23.5元)；转账不计
+        g["txs"].append({"id": "1", "type": "income", "amount_fen": 10000,
+                         "ts": now.isoformat()})
+        g["txs"].append({"id": "2", "type": "expense", "amount_fen": 2350,
+                         "ts": now.isoformat()})
+        g["txs"].append({"id": "3", "type": "transfer", "amount_fen": 5000,
+                         "from_account": "a", "to_account": "b",
+                         "ts": now.isoformat()})
+        data_mod.save_global(g)
+
+        r = self.client.get("/api/stats/assets?months=12")
+        body = r.get_json()
+        self.assertEqual(len(body), 12)
+        cur = next(x for x in body if x["month"] == this_m)
+        self.assertEqual(cur["income"], 100.0)
+        self.assertEqual(cur["expense"], 23.5)
+
 
 if __name__ == "__main__":
     unittest.main()

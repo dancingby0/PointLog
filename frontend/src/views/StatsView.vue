@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted } from "vue";
 import EChart from "../components/EChart.vue";
-import { state, loadStatsSummary, loadStatsDist, loadStatsTrend } from "../store";
+import { state, loadStatsSummary, loadStatsDist, loadStatsTrend, loadStatsAssets } from "../store";
 
 const RANGES = [
   { key: "week", label: "本周" },
@@ -113,10 +113,29 @@ const periodOption = computed(() => {
   };
 });
 
+// 收支趋势（收入 vs 支出）
+const assetsOption = computed(() => {
+  const labels = state.statsAssets.map((x) => x.label);
+  const income = state.statsAssets.map((x) => x.income);
+  const expense = state.statsAssets.map((x) => x.expense);
+  return {
+    tooltip: { trigger: "axis", valueFormatter: (v) => "¥" + Number(v).toFixed(2) },
+    legend: { top: 0, data: ["收入", "支出"] },
+    grid: { left: 56, right: 16, top: 30, bottom: 24 },
+    xAxis: { type: "category", data: labels, axisLabel: { interval: 0, rotate: 30, fontSize: 10 } },
+    yAxis: { type: "value", axisLabel: { formatter: "¥{value}" } },
+    series: [
+      { name: "收入", type: "bar", data: income, itemStyle: { color: "#10b981" } },
+      { name: "支出", type: "bar", data: expense, itemStyle: { color: "#ef4444" } },
+    ],
+  };
+});
+
 onMounted(() => {
   loadStatsSummary();
   loadStatsDist();
   loadStatsTrend();
+  loadStatsAssets();
 });
 </script>
 
@@ -194,6 +213,16 @@ onMounted(() => {
         </div>
         <div class="trend-chart">
           <EChart :option="trendOption" />
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>近 12 个月收支</h2>
+          <span class="muted">绿 = 收入 · 红 = 支出（转账不计，个人级）</span>
+        </div>
+        <div class="trend-chart">
+          <EChart :option="assetsOption" />
         </div>
       </section>
     </template>

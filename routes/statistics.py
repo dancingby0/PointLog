@@ -42,6 +42,11 @@ def _day_points_of(entries: list) -> dict:
     return out
 
 
+def _day_points_map_if_present(d: dict) -> dict:
+    """统一入口：从档案 entries 汇总 daily {date: points}。"""
+    return _day_points_of(d.get("entries", []))
+
+
 @bp.get("/summary")
 def summary():
     try:
@@ -77,9 +82,64 @@ def summary():
     })
 
 
-def _day_points_map_if_present(d: dict) -> dict:
-    """统一入口：从档案 entries 汇总 daily {date: points}。"""
-    return _day_points_of(d.get("entries", []))
+@bp.get("/assets")
+def asset_trend():
+    """收支趋势：近 N 个月每月的 {收入, 支出}（元）。转账/校准不计。?months=12。"""
+    try:
+        months = int(request.args.get("months", 12))
+        months = max(3, min(months, 24))
+    except ValueError:
+        return jsonify({"error": "months 应为整数"}), 400
+
+    now = dt.datetime.now().astimezone()
+    today = date_of(now)
+    g = data.load_global()
+
+    # 生成近 months 个月 (year, month) 序列（新→旧再反转）
+    buckets = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        buckets.append((y, m))
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    buckets.reverse()
+    keys = [f"{y:04d}-{m:02d}" for y, m in buckets]
+
+    # 预聚合: month_prefix -> {"income": 分, "expense": 分}
+    agg = {k: {"income": 0, "expense": 0} for k in keys}
+    for t in g.get("txs", []):
+        tx_type = t.get("type")
+        if tx_type not in ("income", "expense"):
+            continue
+        try:
+            ts = str(t.get("ts", ""))
+            raw = ts[:-1] + "+00:00" if ts.endswith("Z") else ts
+            parsed = dt.datetime.fromisoformat(raw)
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone()
+            month_prefix = parsed.strftime("%Y-%m")
+        except (ValueError, TypeError):
+            continue
+        if month_prefix not in agg:
+            continue
+        try:
+            fen = int(t.get("amount_fen", 0))
+        except (ValueError, TypeError):
+            continue
+        agg[month_prefix][tx_type] += fen
+
+    out = []
+    for key in keys:
+        y, m = int(key[:4]), int(key[5:7])
+        out.append({
+            "month": key,
+            "label": f"{y}年{m}月",
+            "income": round(agg[key]["income"] / 100, 2),
+            "expense": round(agg[key]["expense"] / 100, 2),
+        })
+    return jsonify(out)
 
 
 @bp.get("/trend")

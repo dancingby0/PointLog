@@ -22,6 +22,7 @@ export const state = reactive({
   statsRange: "month",    // 统计时间范围
   statsTrend: [],         // 统计：月度趋势
   statsDist: null,        // 统计：分布（标签/星期/时段）
+  statsAssets: [],        // 统计：收支月度趋势
   editingId: null,        // 正在编辑的记录 id
   form: { content: "", points: 1, category: "", ts: "" },
   noteDraft: "",          // 感想草稿
@@ -790,6 +791,17 @@ export async function loadStatsDist() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "加载分布失败");
     state.statsDist = data;
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function loadStatsAssets() {
+  try {
+    const res = await fetch("/api/stats/assets?months=12");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载收支趋势失败");
+    state.statsAssets = data;
   } catch (err) {
     console.error(err);
   }
