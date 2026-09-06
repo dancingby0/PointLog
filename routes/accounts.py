@@ -29,8 +29,20 @@ def _has_account_pin(name: str) -> bool:
 
 @bp.get("")
 def list_accounts_api():
-    """账号列表 + 当前选中 + 自动登录标记。"""
+    """账号列表 + 当前选中 + 自动登录标记。
+
+    若进程内未登录，但开启自动登录且记忆账号无 PIN，则自动登录进入该账号。
+    记忆账号有 PIN 时不做自动登录（前端会引导输入 PIN）。
+    """
     meta = data.load_accounts_meta()
+    # 自动登录逻辑：仅当进程内未登录
+    if not config.CURRENT_ACCOUNT and meta.get("auto_login") and meta.get("current"):
+        remembered = meta["current"]
+        if remembered in meta["accounts"] and not _has_account_pin(remembered):
+            config.CURRENT_ACCOUNT = remembered
+            profs = data.account_profile_dirs(remembered)
+            config.CURRENT_PROFILE = profs[0] if profs else "default"
+
     accounts = data.list_accounts()
     return jsonify({
         "accounts": accounts,
@@ -62,6 +74,14 @@ def create_account_api():
         s = data._load_account_settings(name)
         s["pin_hash"] = generate_password_hash(pin)
         data.save_account_settings(name, s)
+
+    # 创建后自动登录进入（账号记忆为 current）
+    config.CURRENT_ACCOUNT = name
+    config.CURRENT_PROFILE = "默认"
+    meta = data.load_accounts_meta()
+    meta["current"] = name
+    data.save_accounts_meta(meta)
+
     return jsonify({"name": name, "has_pin": _has_account_pin(name)}), 201
 
 

@@ -37,6 +37,11 @@ export const state = reactive({
   profiles: [],
   currentProfile: "",
   currentHasPin: false,
+  // 账号（v2.3）
+  currentAccount: "",      // 当前本地账号名
+  accountHasPin: false,    // 当前账号是否有锁
+  authAccounts: [],        // 账号列表 [{name, has_pin, auto_login}]
+  autoLogin: false,        // 自动登录开关
   dialog: null,           // {mode, tip, code?, target?}
   pinInput: "",
   newProfileName: "",
@@ -85,6 +90,129 @@ export const currentYear = () => new Date().getFullYear();
 export const calYearLabel = () => state.calendarYear || currentYear();
 
 export const calCanNext = () => !!state.calendarYear && state.calendarYear < currentYear();
+
+// ================= 账号（v2.3） =================
+
+export async function initAuth() {
+  try {
+    const res = await fetch("/api/auth");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载账号失败");
+    state.authAccounts = data.accounts;
+    state.currentAccount = data.logged_in || "";
+    state.autoLogin = data.auto_login;
+    if (data.logged_in) {
+      const cur = state.authAccounts.find((a) => a.name === data.logged_in);
+      state.accountHasPin = !!(cur && cur.has_pin);
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function loginAccount(name, pin = "") {
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, pin }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "登录失败");
+    state.currentAccount = data.account;
+    state.currentProfile = data.profile;
+    state.currentHasPin = false;
+    await initAuth();
+    resetForProfileChange();
+    await loadProfiles();
+    await loadAll();
+    return true;
+  } catch (err) {
+    state.dialogError = err.message;
+    return false;
+  }
+}
+
+export async function logoutAccount() {
+  try {
+    const res = await fetch("/api/auth/logout", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "登出失败");
+    state.currentAccount = "";
+    state.currentProfile = "";
+    state.accountHasPin = false;
+    resetForProfileChange();
+    await initAuth();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function createAccount(name, pin = "") {
+  try {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, pin }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "创建失败");
+    await initAuth();
+    await loginAccount(name, pin);
+  } catch (err) {
+    state.dialogError = err.message;
+  }
+}
+
+export async function deleteAccount(name, pin = "") {
+  try {
+    const res = await fetch(`/api/auth/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "注销失败");
+    if (state.currentAccount === name) state.currentAccount = "";
+    state.accountHasPin = false;
+    resetForProfileChange();
+    await initAuth();
+    return true;
+  } catch (err) {
+    state.dialogError = err.message;
+    return false;
+  }
+}
+
+export async function setAutoLogin(enabled) {
+  try {
+    const res = await fetch("/api/auth/set-auto-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    state.autoLogin = data.auto_login;
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function setAccountPin(pin) {
+  try {
+    const res = await fetch("/api/auth/pin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    state.accountHasPin = data.has_pin;
+  } catch (err) {
+    state.dialogError = err.message;
+  }
+}
 
 // ================= 档案 + PIN =================
 
