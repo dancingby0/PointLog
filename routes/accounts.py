@@ -44,8 +44,9 @@ def list_accounts_api():
     记忆账号有 PIN 时不做自动登录（前端会引导输入 PIN）。
     """
     meta = data.load_accounts_meta()
-    # 自动登录逻辑：仅当进程内未登录
-    if not config.CURRENT_ACCOUNT and meta.get("auto_login") and meta.get("current"):
+    # 自动登录逻辑：仅当"进程内未登录"且"用户本进程内未主动登出过"时触发（即：服务刚启动）
+    if (not config.CURRENT_ACCOUNT and not config.AUTO_LOGIN_SUPPRESSED
+            and meta.get("auto_login") and meta.get("current")):
         remembered = meta["current"]
         if remembered in meta["accounts"]:
             # 有 PIN 的账号：仅当处于免输窗口内才自动登录
@@ -131,9 +132,14 @@ def login_account_api():
 
 @bp.post("/logout")
 def logout_account_api():
-    """登出：清当前账号/档案（免输窗口保留，窗口内重进免输）。"""
+    """登出：清当前账号/档案，回到账号选择页。
+
+    自动登录只在服务刚启动时触发；本次进程内主动登出后不再自动登录
+    （否则开了自动登录会"登出即被拉回"）。免输窗口保留，窗口内重进免输。
+    """
     config.CURRENT_ACCOUNT = ""
     config.CURRENT_PROFILE = "default"
+    config.AUTO_LOGIN_SUPPRESSED = True
     return jsonify({"ok": True})
 
 
@@ -194,4 +200,7 @@ def delete_account_api(name: str):
     if config.UNLOCKED_ACCOUNT == name:  # 账号已删除，清其免输窗口
         config.UNLOCKED_ACCOUNT = ""
         config.UNLOCKED_UNTIL = 0.0
+    if meta.get("auto_login"):
+        # 注销后停在账号选择页，不自动登入剩余账号
+        config.AUTO_LOGIN_SUPPRESSED = True
     return jsonify({"ok": True})
