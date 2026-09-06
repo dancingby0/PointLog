@@ -44,7 +44,7 @@
   <section class="card goal-card">
     <template v-if="goalEditing">
       <input v-model.trim="goalDraft" type="text" maxlength="100"
-             placeholder="写下当前的主目标，如：主攻物理" @keyup.enter="saveGoal">
+             placeholder="写下当前的主目标，如：读完一本书" @keyup.enter="saveGoal">
       <div class="goal-actions">
         <button type="button" @click="saveGoal" :disabled="!goalDraft.trim()">保存主目标</button>
         <button type="button" class="ghost" @click="cancelGoalEdit">取消</button>
@@ -115,13 +115,13 @@
   <form class="card" @submit.prevent="submit">
     <h2>{{ editingId ? '编辑打卡' : '新增打卡' }}</h2>
     <label>做什么（一句话）
-      <input v-model.trim="form.content" type="text" maxlength="100" placeholder="例：背完《岳阳楼记》">
+      <input v-model.trim="form.content" type="text" maxlength="100" placeholder="例：背完30个英语单词">
     </label>
     <label>点数
       <input v-model.number="form.points" type="number" min="0" step="1" placeholder="1">
     </label>
     <label>类别（可选）
-      <input v-model.trim="form.category" type="text" maxlength="20" placeholder="例：语文 / 运动">
+      <input v-model.trim="form.category" type="text" maxlength="20" placeholder="例：学习 / ">
     </label>
     <label>时间（默认：{{ selectedIsToday ? '现在' : selectedDay + ' 12:00' }}，凌晨4点前算昨日）
       <input v-model="form.ts" type="datetime-local">
@@ -149,14 +149,33 @@
   <section class="card">
     <div class="card-head">
       <h2>{{ selectedLabel }} 的感想</h2>
-      <button type="button" class="ghost" @click="stampNote" title="在末尾插入此刻时间，方便追加一段">⏱ 插入此刻时间</button>
+      <button type="button" class="ghost" v-if="noteEditing" @click="stampNote" title="在末尾插入此刻时间，方便追加一段">⏱ 插入此刻时间</button>
     </div>
-    <textarea v-model="noteDraft" rows="6"
-      placeholder="写下这一天的感想：梦、去了哪里、任何想记的事……（选中历史日期即可补写当天）"></textarea>
-    <div class="note-actions">
-      <button type="button" @click="saveNote">保存感想</button>
-      <button type="button" class="ghost" v-if="hasNote || noteDraft.trim()" @click="deleteNote">删除当天感想</button>
-    </div>
+
+    <!-- 编辑 / 追加模式 -->
+    <template v-if="noteEditing">
+      <textarea v-model="noteDraft" rows="6"
+        placeholder="写下这一天的感想：梦、遇见了谁、今天的心情、任何想记的事……（选中历史日期即可补写当天）"></textarea>
+      <div class="note-actions">
+        <button type="button" @click="saveNote">保存感想</button>
+        <button type="button" class="ghost" @click="cancelNoteEdit">取消</button>
+      </div>
+    </template>
+
+    <!-- 展示模式：已有感想 -->
+    <template v-else-if="hasNote">
+      <p class="note-view">{{ noteDraft }}</p>
+      <div class="note-actions">
+        <button type="button" class="ghost" @click="startNoteEdit">✏️ 编辑 / 追加</button>
+        <button type="button" class="ghost" @click="deleteNote">删除当天感想</button>
+      </div>
+    </template>
+
+    <!-- 展示模式：还没有感想 -->
+    <template v-else>
+      <p class="muted">这一天还没有感想。</p>
+      <button type="button" @click="startNoteEdit">✏️ 写一段感想</button>
+    </template>
   </section>
 
   <!-- 备忘录（常驻列表） -->
@@ -164,7 +183,7 @@
     <h2>备忘录</h2>
     <div class="memo-input">
       <input v-model.trim="memoDraft" type="text" maxlength="200"
-             placeholder="例：周四打扫寝室 / 作业 deadline 是 9月20日" @keyup.enter="addMemo">
+             placeholder="例：周六和同学约了出去玩 / 借的书在10月30号前还" @keyup.enter="addMemo">
       <button type="button" @click="addMemo">添加</button>
     </div>
     <p v-if="memos.length === 0" class="muted">还没有备忘，随手记点什么吧。</p>

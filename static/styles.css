@@ -133,6 +133,16 @@ textarea {
 textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .note-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
 
+/* 感想：只读展示（保留换行） */
+.note-view {
+  white-space: pre-wrap;
+  margin: 0;
+  line-height: 1.7;
+  color: var(--text);
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+}
+
 /* ---- 置顶主目标横幅 ---- */
 .goal-card {
   display: flex;
@@ -217,6 +227,13 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   font-size: 24px;
   letter-spacing: 10px;
   margin-bottom: 14px;
+}
+/* 提示文字保持小号、正常间距（PIN 数字才用大字） */
+.lock-box input::placeholder {
+  font-size: 13px;
+  letter-spacing: normal;
+  color: var(--muted);
+  text-align: center;
 }
 .lock-err { color: var(--danger); font-size: 13px; min-height: 18px; }
 .lock-actions { display: flex; gap: 10px; justify-content: center; }

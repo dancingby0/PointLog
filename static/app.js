@@ -59,6 +59,7 @@ createApp({
       form: { content: "", points: 1, category: "", ts: "" },
       noteDraft: "",          // 每日感想编辑框内容（随所选日期切换）
       hasNote: false,         // 所选日期是否已有保存的感想
+      noteEditing: false,     // 是否正在编辑/追加感想
       memos: [],              // 备忘录列表
       memoDraft: "",          // 新增备忘输入框
       mainGoal: "",           // 置顶主目标
@@ -443,11 +444,27 @@ createApp({
         if (!res.ok) throw new Error(data.error || "加载感想失败");
         this.noteDraft = data.note || "";
         this.hasNote = !!data.note;
+        this.noteEditing = false;
       } catch (err) {
         console.error(err);
         this.noteDraft = "";
         this.hasNote = false;
+        this.noteEditing = false;
       }
+    },
+
+    // 进入编辑/追加模式
+    startNoteEdit() {
+      this.noteEditing = true;
+      this.$nextTick(() => {
+        const ta = document.querySelector(".card textarea");
+        if (ta) ta.focus();
+      });
+    },
+
+    cancelNoteEdit() {
+      // 取消编辑：丢弃草稿，重新加载已保存内容（无则清空）
+      this.loadNote();
     },
 
     // 保存（覆盖）当天整篇感想
@@ -467,6 +484,7 @@ createApp({
         if (!res.ok) throw new Error(data.error || "保存失败");
         this.noteDraft = data.note;
         this.hasNote = true;
+        this.noteEditing = false;   // 保存完毕收起编辑框，回到只读展示
       } catch (err) {
         alert("保存失败：" + err.message);
       }
