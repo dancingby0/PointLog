@@ -156,6 +156,42 @@ def set_auto_login():
     return jsonify({"auto_login": enabled, "current": meta.get("current", "")})
 
 
+@bp.put("/rename")
+def rename_account_api():
+    """当前账号改名。body {name, pin?}；设了 PIN 的账号需验证 PIN。
+
+    目录随之重命名（档案/资产跟随），免输窗口与当前会话同步到新名。
+    """
+    if not config.CURRENT_ACCOUNT:
+        return jsonify({"error": "未登录"}), 401
+    body = request.get_json(silent=True) or {}
+    new_name = str(body.get("name", "")).strip()
+    old_name = config.CURRENT_ACCOUNT
+    if old_name == new_name:
+        return jsonify({"account": old_name})
+    try:
+        data.validate_account_name(new_name)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    meta = data.load_accounts_meta()
+    if new_name in meta["accounts"]:
+        return jsonify({"error": "已存在同名账号"}), 400
+    if _has_account_pin(old_name):
+        pin = str(body.get("pin", ""))
+        ph = data._load_account_settings(old_name).get("pin_hash")
+        if not check_password_hash(ph, pin):
+            return jsonify({"error": "PIN 不正确"}), 401
+
+    try:
+        data.rename_account(old_name, new_name)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    config.CURRENT_ACCOUNT = new_name
+    if config.UNLOCKED_ACCOUNT == old_name:  # 免输窗口跟随新名
+        config.UNLOCKED_ACCOUNT = new_name
+    return jsonify({"account": new_name})
+
+
 @bp.put("/pin")
 def set_account_pin():
     """当前账号设置/清除 PIN。body {pin}（空串清除）。"""

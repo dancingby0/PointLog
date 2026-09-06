@@ -194,6 +194,50 @@ class AccountsApiTest(ApiTestCase):
         r = self.client.delete("/api/auth/唯一账号")
         self.assertEqual(r.status_code, 400)
 
+    def test_rename_account(self):
+        self._mk("旧名")
+        # 留点数据，验证改名后仍可读
+        r = self.client.post("/api/entries", json={"content": "改名测试数据", "points": 1})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        r = self.client.put("/api/auth/rename", json={"name": "新名"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["account"], "新名")
+        self.assertEqual(config.CURRENT_ACCOUNT, "新名")
+        # meta 与目录同步
+        meta = data.load_accounts_meta()
+        self.assertNotIn("旧名", meta["accounts"])
+        self.assertIn("新名", meta["accounts"])
+        self.assertEqual(meta["current"], "新名")
+        self.assertFalse((data.DATA_DIR / "旧名").exists())
+        self.assertTrue((data.DATA_DIR / "新名").exists())
+        # 数据仍可读
+        body = self.client.get("/api/entries").get_json()
+        self.assertEqual(len(body["entries"]), 1)
+        # 用新名可重新登录
+        self.client.post("/api/auth/logout")
+        r = self.client.post("/api/auth/login", json={"name": "新名"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_rename_conflict_rejected(self):
+        self._mk("账号1")
+        self._mk("账号2")
+        self.client.post("/api/auth/login", json={"name": "账号1"})
+        r = self.client.put("/api/auth/rename", json={"name": "账号2"})
+        self.assertEqual(r.status_code, 400)
+        r = self.client.put("/api/auth/rename", json={"name": "../evil"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_rename_requires_pin_if_set(self):
+        self._mk("旧名锁", "1234")
+        self.client.post("/api/auth/login", json={"name": "旧名锁", "pin": "1234"})
+        r = self.client.put("/api/auth/rename", json={"name": "新名锁"})
+        self.assertEqual(r.status_code, 401)
+        r = self.client.put("/api/auth/rename", json={"name": "新名锁", "pin": "1234"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()["account"], "新名锁")
+        # 免输窗口跟随新名
+        self.assertEqual(config.UNLOCKED_ACCOUNT, "新名锁")
+
     def test_auto_login_switch(self):
         self._mk("账号G")
         self.client.post("/api/auth/login", json={"name": "账号G"})

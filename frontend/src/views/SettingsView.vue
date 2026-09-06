@@ -5,6 +5,7 @@ import {
   state,
   logoutAccount,
   deleteAccount,
+  renameAccount,
   setAutoLogin,
   setAccountPin,
 } from "../store";
@@ -15,6 +16,29 @@ const delCode = ref("");
 const accountPinMode = ref(false);
 const newPin = ref("");
 const pinErr = ref("");
+const renameMode = ref(false);
+const renameForm = reactive({ name: "", pin: "", err: "" });
+
+function openRename() {
+  renameForm.name = state.currentAccount;
+  renameForm.pin = "";
+  renameForm.err = "";
+  renameMode.value = true;
+}
+
+async function submitRename() {
+  const name = renameForm.name.trim();
+  if (!name) { renameForm.err = "新账号名不能为空"; return; }
+  if (name === state.currentAccount) { renameMode.value = false; return; }
+  const ok = await renameAccount(name, renameForm.pin);
+  if (ok) {
+    renameMode.value = false;
+    renameForm.name = "";
+    renameForm.pin = "";
+  } else {
+    renameForm.err = state.dialogError || "改名失败";
+  }
+}
 
 function openLogout() {
   confirmMode.value = "logout";
@@ -70,7 +94,20 @@ async function saveAccountPin() {
 
     <section class="card">
       <div class="card-head">
-        <h2>👤 当前账号：{{ state.currentAccount }}</h2>
+        <h2>👤 当前账号</h2>
+      </div>
+
+      <div class="set-row" v-if="!renameMode">
+        <span>账号名：<strong>{{ state.currentAccount }}</strong></span>
+        <button type="button" class="ghost" @click="openRename">✏️ 改名</button>
+      </div>
+      <div class="set-row" v-else>
+        <input v-model="renameForm.name" type="text" maxlength="30" placeholder="新账号名">
+        <input v-if="state.accountHasPin" v-model="renameForm.pin" type="password" inputmode="numeric" maxlength="8"
+               placeholder="账号 PIN" @keyup.enter="submitRename">
+        <button type="button" @click="submitRename">保存</button>
+        <button type="button" class="ghost" @click="renameMode = false; renameForm.err = ''">取消</button>
+        <span class="lock-err">{{ renameForm.err }}</span>
       </div>
 
       <div class="set-row">

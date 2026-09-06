@@ -177,6 +177,24 @@ export async function deleteAccount(name, pin = "") {
   }
 }
 
+export async function renameAccount(name, pin = "") {
+  try {
+    const res = await fetch("/api/auth/rename", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, pin }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "改名失败");
+    state.currentAccount = data.account;
+    await initAuth();
+    return true;
+  } catch (err) {
+    state.dialogError = err.message;
+    return false;
+  }
+}
+
 export async function setAutoLogin(enabled) {
   try {
     const res = await fetch("/api/auth/set-auto-login", {

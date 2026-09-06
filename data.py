@@ -363,6 +363,27 @@ def save_account_assets(account: str, g: dict) -> None:
     tmp.replace(path)
 
 
+def rename_account(old_name: str, new_name: str) -> None:
+    """账号改名：账号目录 + meta 同步。old_name 必须是现有账号。"""
+    validate_account_name(new_name)
+    if old_name == new_name:
+        return
+    meta = load_accounts_meta()
+    if old_name not in meta["accounts"]:
+        raise ValueError("账号不存在")
+    if new_name in meta["accounts"]:
+        raise ValueError("已存在同名账号")
+    src = DATA_DIR / old_name
+    dst = DATA_DIR / new_name
+    if not src.is_dir():
+        raise ValueError("账号目录缺失")
+    src.rename(dst)
+    meta["accounts"] = [new_name if a == old_name else a for a in meta["accounts"]]
+    if meta.get("current") == old_name:
+        meta["current"] = new_name
+    save_accounts_meta(meta)
+
+
 def delete_account(name: str) -> None:
     """注销账号：删除账号目录。"""
     validate_account_name(name)
