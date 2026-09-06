@@ -13,6 +13,7 @@ export const state = reactive({
   yearOptions: [],        // 可选年份
   calendarDays: [],       // 贡献日历数据
   calendarYear: 0,        // 贡献日历当前年份（0=今年）
+  diaryTags: [],          // 日记标签池（当前档案）
   editingId: null,        // 正在编辑的记录 id
   form: { content: "", points: 1, category: "", ts: "" },
   noteDraft: "",          // 感想草稿
@@ -122,6 +123,7 @@ export function resetForProfileChange() {
   state.goalDraft = "";
   state.goalEditing = false;
   state.line = null;
+  state.diaryTags = [];
 }
 
 export async function doSwitch(name, pin) {
@@ -342,10 +344,23 @@ export function initYearOptions() {
   for (let y = cur - 5; y <= cur; y++) state.yearOptions.push(y);
 }
 
+export async function loadDiaryTags() {
+  try {
+    const res = await fetch("/api/tags/diary");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载日记标签失败");
+    state.diaryTags = data.tags;
+  } catch (err) {
+    console.error(err);
+    state.diaryTags = [];
+  }
+}
+
 export async function loadAll() {
   try {
     initYearOptions();
     state.viewMonth = todayStr().slice(0, 7);   // 默认当年当月
+    await loadDiaryTags();
     await loadDays();
     await loadCalendar();
     await loadMemos();

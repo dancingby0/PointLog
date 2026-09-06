@@ -1,5 +1,22 @@
 <script setup>
 import { state, selectedIsToday, submitEntry, endEdit } from "../store";
+import TagSelect from "./TagSelect.vue";
+
+async function onAddDiaryTag(tag) {
+  try {
+    await fetch("/api/tags/diary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag }),
+    });
+    // 同步最新池（简单再拉一次）
+    const res = await fetch("/api/tags/diary");
+    const data = await res.json();
+    if (res.ok) state.diaryTags = data.tags;
+  } catch (err) {
+    console.error(err);
+  }
+}
 </script>
 
 <template>
@@ -11,8 +28,8 @@ import { state, selectedIsToday, submitEntry, endEdit } from "../store";
     <label>点数
       <input v-model.number="state.form.points" type="number" min="0" step="1" placeholder="1">
     </label>
-    <label>类别（可选）
-      <input v-model.trim="state.form.category" type="text" maxlength="20" placeholder="例：学习 / 生活 / 运动">
+    <label class="label-block">类别（可选）
+      <TagSelect :tags="state.diaryTags" v-model="state.form.category" @add-tag="onAddDiaryTag" />
     </label>
     <label>时间（默认：{{ selectedIsToday() ? '现在' : state.selectedDay + ' 12:00' }}，凌晨4点前算昨日）
       <input v-model="state.form.ts" type="datetime-local">
@@ -21,3 +38,4 @@ import { state, selectedIsToday, submitEntry, endEdit } from "../store";
     <button type="button" class="ghost" v-if="state.editingId" @click="endEdit">取消编辑</button>
   </form>
 </template>
+

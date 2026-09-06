@@ -318,6 +318,77 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .day-note { font-size: 13px; }
 .day-points { margin-left: auto; font-weight: 700; color: var(--accent); }
 
+/* ---- v2：顶部导航 ---- */
+.topnav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 0 16px;
+}
+.topnav .brand { font-weight: 700; font-size: 18px; text-decoration: none; color: var(--text); }
+.nav-links { display: flex; gap: 6px; }
+.nav-links a {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+}
+.nav-links a:hover { color: var(--text); background: #eef0f3; }
+.nav-links a.router-link-active { color: #fff; background: var(--accent); }
+.views { margin-top: 4px; }
+
+/* ---- v2：标签 ---- */
+.label-block { display: block; }
+.tag-select { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
+.tag-select input.plain {
+  font-size: 14px;
+  letter-spacing: normal;
+  text-align: left;
+  width: 100%;
+  margin-top: 0;
+}
+.tag-opt {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text);
+}
+.tag-opt:hover { border-color: var(--accent); }
+.tag-opt.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tag-opt.custom { border-style: dashed; color: var(--muted); }
+.tag-chosen { color: var(--accent); font-weight: 600; font-size: 13px; }
+
+.tag-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.tag-input-row input { flex: 1; margin-top: 0; }
+.tag-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 4px 6px 4px 12px;
+  font-size: 13px;
+}
+.tag-x {
+  background: transparent;
+  border: 0;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.tag-x:hover { color: var(--danger); }
+
+
 /* ---- 贡献日历（GitHub 风格热力图） ---- */
 .card-head {
   display: flex;

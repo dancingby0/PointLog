@@ -1,22 +1,8 @@
 <script setup>
 import { onMounted } from "vue";
-import ProfileBar from "./components/ProfileBar.vue";
-import TodayCard from "./components/TodayCard.vue";
-import GoalCard from "./components/GoalCard.vue";
-import DayPicker from "./components/DayPicker.vue";
-import ContribCalendar from "./components/ContribCalendar.vue";
-import EntryForm from "./components/EntryForm.vue";
-import EntryList from "./components/EntryList.vue";
-import NoteCard from "./components/NoteCard.vue";
-import MemoCard from "./components/MemoCard.vue";
+import { RouterView } from "vue-router";
 import DialogOverlay from "./components/DialogOverlay.vue";
-import {
-  state,
-  loadProfiles,
-  loadAll,
-  showLock,
-  watchIdle,
-} from "./store";
+import { state, loadProfiles, loadAll, showLock, watchIdle } from "./store";
 
 onMounted(async () => {
   await loadProfiles();
@@ -33,15 +19,17 @@ onMounted(async () => {
   <main class="wrap">
     <h1>PointLog</h1>
 
-    <ProfileBar />
-    <TodayCard />
-    <GoalCard />
-    <DayPicker />
-    <ContribCalendar />
-    <EntryForm />
-    <EntryList />
-    <NoteCard />
-    <MemoCard />
+    <nav class="topnav">
+      <RouterLink to="/" class="brand">🎯 PointLog</RouterLink>
+      <div class="nav-links">
+        <RouterLink to="/">日记</RouterLink>
+        <RouterLink to="/assets">资产</RouterLink>
+        <RouterLink to="/stats">统计</RouterLink>
+        <RouterLink to="/settings">设置</RouterLink>
+      </div>
+    </nav>
+
+    <RouterView />
 
     <DialogOverlay />
   </main>

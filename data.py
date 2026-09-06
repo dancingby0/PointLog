@@ -60,17 +60,8 @@ def default_data() -> dict:
         "daily_notes": {},   # 每日感想：{ "YYYY-MM-DD": "文本" }，一天一篇
         "memos": [],         # 备忘录：[{ "id": str, "text": str }]
         "main_goal": "",     # 置顶主目标（v1 仅展示用）
+        "diary_tags": [],    # 日记标签池（档案级）：快捷填词库，存文本
     }
-
-
-def profile_dir(profile: str) -> Path:
-    """返回某个档案对应的目录（不存在则创建）。"""
-    # 档案名仅允许安全字符，防止路径穿越
-    if not profile or any(c in profile for c in '\\/:*?"<>|') or profile in (".", ".."):
-        raise ValueError(f"非法档案名: {profile!r}")
-    d = DATA_DIR / profile
-    d.mkdir(parents=True, exist_ok=True)
-    return d
 
 
 def list_profiles() -> list[str]:
@@ -154,3 +145,52 @@ def save(profile: str, data: dict) -> None:
 def new_id() -> str:
     """生成记录 ID：毫秒时间戳（本机单用户足够唯一）。"""
     return str(int(time.time() * 1000))
+
+
+# ---------- 个人级（全局共享）数据：data/global.json ----------
+# 与档案隔离的"个人级"存储：资产标签池、账户、收支等（不属于任何档案，切换档案不影响）。
+
+
+def global_path() -> Path:
+    return DATA_DIR / "global.json"
+
+
+def default_global() -> dict:
+    """个人级数据结构。"""
+    return {
+        "asset_tags": [],   # 资产标签池（个人级）：收支/平台等快捷词
+        "accounts": [],     # 账户（v2.1 启用）：[{id, name, balance, kind}]
+        "txs": [],          # 收支/转账流水（v2.1 启用）
+    }
+
+
+def load_global() -> dict:
+    """读取个人级数据；不存在或损坏时返回空结构（损坏时备份原文件）。"""
+    path = global_path()
+    if not path.exists():
+        return default_global()
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            g = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        backup = path.with_suffix(".json.bak")
+        try:
+            path.replace(backup)
+        except OSError:
+            pass
+        return default_global()
+    base = default_global()
+    for key in base:
+        g.setdefault(key, base[key])
+    return g
+
+
+def save_global(g: dict) -> None:
+    """原子写 data/global.json。"""
+    path = global_path()
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(g, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
