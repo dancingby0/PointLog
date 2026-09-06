@@ -1,0 +1,695 @@
+// PointLog 全局 store：共享状态 + 业务动作
+// （原 app.js 的 data + methods 集中于此；组件通过具名导入使用）
+import { reactive } from "vue";
+import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel } from "./utils";
+
+export const state = reactive({
+  entries: [],            // 当前所选天的记录
+  dayPoints: 0,           // 当前所选天的点数
+  line: null,             // 点数线计算结果
+  selectedDay: "",        // 当前所选日期 YYYY-MM-DD
+  viewMonth: "",          // 日期选择器当前年月 YYYY-MM
+  days: [],               // 当月逐日列表
+  yearOptions: [],        // 可选年份
+  calendarDays: [],       // 贡献日历数据
+  calendarYear: 0,        // 贡献日历当前年份（0=今年）
+  editingId: null,        // 正在编辑的记录 id
+  form: { content: "", points: 1, category: "", ts: "" },
+  noteDraft: "",          // 感想草稿
+  hasNote: false,         // 当天是否有感想
+  noteEditing: false,     // 是否在编辑感想
+  memos: [],
+  memoDraft: "",
+  mainGoal: "",
+  goalDraft: "",
+  goalEditing: false,
+  // 档案 + PIN
+  profiles: [],
+  currentProfile: "",
+  currentHasPin: false,
+  dialog: null,           // {mode, tip, code?, target?}
+  pinInput: "",
+  newProfileName: "",
+  renameName: "",
+  codeInput: "",
+  dialogError: "",
+  lastActivity: Date.now(),
+});
+
+// ---------- 小工具（组件共用） ----------
+export const todayStr = () => toDateStr(new Date());
+
+export function selectedLabel() {
+  if (!state.selectedDay) return "";
+  if (state.selectedDay === todayStr()) return "今天";
+  const diff = Math.round((fromDateStr(todayStr()) - fromDateStr(state.selectedDay)) / 86400000);
+  if (diff === 1) return "昨天";
+  return `${state.selectedDay} ${weekdayLabel(state.selectedDay)}`;
+}
+
+export const selectedIsToday = () => state.selectedDay === todayStr();
+
+export function lineText() {
+  if (!state.line || state.line.active_days === 0) return "—";
+  const b = state.line.baseline;
+  return Number.isInteger(b) ? String(b) : b.toFixed(1);
+}
+
+export function dialogTitle() {
+  if (!state.dialog) return "";
+  switch (state.dialog.mode) {
+    case "lock": return "🔒 已锁定";
+    case "switch": return `切换到「${state.dialog.target}」`;
+    case "pinSetup": return state.currentHasPin ? "修改 PIN" : "设置 PIN";
+    case "new": return "新建档案";
+    case "rename": return "重命名当前档案";
+    case "delete": return "⚠️ 删除当前档案";
+    default: return "";
+  }
+}
+
+export const isLocked = () => !!(state.dialog && state.dialog.mode === "lock");
+
+export const currentYear = () => new Date().getFullYear();
+
+export const calYearLabel = () => state.calendarYear || currentYear();
+
+export const calCanNext = () => !!state.calendarYear && state.calendarYear < currentYear();
+
+// ================= 档案 + PIN =================
+
+export async function loadProfiles() {
+  try {
+    const res = await fetch("/api/profiles");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载档案失败");
+    state.profiles = data.profiles;
+    state.currentProfile = data.current;
+    const cur = state.profiles.find((p) => p.name === data.current);
+    state.currentHasPin = !!(cur && cur.has_pin);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export function showLock(tip) {
+  state.dialog = { mode: "lock", tip };
+  state.pinInput = "";
+  state.dialogError = "";
+}
+
+export function resetForProfileChange() {
+  state.dialog = null;
+  state.pinInput = "";
+  state.dialogError = "";
+  state.newProfileName = "";
+  state.entries = [];
+  state.dayPoints = 0;
+  state.selectedDay = "";
+  state.viewMonth = "";
+  state.days = [];
+  state.yearOptions = [];
+  state.calendarDays = [];
+  state.calendarYear = 0;
+  state.editingId = null;
+  state.form = { content: "", points: 1, category: "", ts: "" };
+  state.noteDraft = "";
+  state.hasNote = false;
+  state.noteEditing = false;
+  state.memos = [];
+  state.memoDraft = "";
+  state.mainGoal = "";
+  state.goalDraft = "";
+  state.goalEditing = false;
+  state.line = null;
+}
+
+export async function doSwitch(name, pin) {
+  try {
+    const res = await fetch("/api/profiles/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, pin }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "切换失败");
+    resetForProfileChange();
+    await loadProfiles();
+    await loadAll();
+  } catch (err) {
+    state.dialogError = err.message;
+  }
+}
+
+export async function onProfileSelect(ev) {
+  const name = ev.target.value;
+  if (name === state.currentProfile) return;
+  const target = state.profiles.find((p) => p.name === name);
+  if (target && target.has_pin) {
+    state.dialog = { mode: "switch", tip: `档案「${name}」已设 PIN，请输入后切换`, target: name };
+    state.pinInput = "";
+    state.dialogError = "";
+  } else {
+    await doSwitch(name, "");
+  }
+}
+
+export function openNewProfile() {
+  state.dialog = { mode: "new", tip: "创建一个全新的空档案（数据与其他档案隔离）" };
+  state.newProfileName = "";
+  state.dialogError = "";
+}
+
+export function openRenameProfile() {
+  state.dialog = {
+    mode: "rename",
+    tip: state.currentHasPin
+      ? `给「${state.currentProfile}」起新名字（需输入 PIN 确认）`
+      : `给「${state.currentProfile}」起个新名字`,
+  };
+  state.renameName = state.currentProfile;
+  state.pinInput = "";
+  state.dialogError = "";
+}
+
+export function openDeleteProfile() {
+  const code = String(Math.floor(1000 + Math.random() * 9000));
+  state.dialog = {
+    mode: "delete",
+    code,
+    tip: state.currentHasPin
+      ? `将永久删除「${state.currentProfile}」的所有数据（需输入验证码和 PIN）`
+      : `将永久删除「${state.currentProfile}」的所有数据，不可恢复！`,
+  };
+  state.codeInput = "";
+  state.pinInput = "";
+  state.dialogError = "";
+}
+
+export function openPinSetup() {
+  state.dialog = { mode: "pinSetup", tip: state.currentHasPin ? "输入新的 4~8 位数字 PIN" : "为当前档案设置 4~8 位数字 PIN" };
+  state.pinInput = "";
+  state.dialogError = "";
+}
+
+export function doLock() {
+  showLock("已锁定，输入 PIN 解锁");
+}
+
+export function clearPin() {
+  state.dialogError = "";
+  setPin("");
+}
+
+export function closeDialog() {
+  if (state.dialog && state.dialog.mode === "lock") return;
+  state.dialog = null;
+  state.dialogError = "";
+}
+
+export function exportData() {
+  // 附件下载不会离开当前页
+  window.location.href = "/api/export";
+}
+
+export function watchIdle() {
+  const touch = () => { state.lastActivity = Date.now(); };
+  ["mousemove", "keydown", "click", "scroll"].forEach((ev) =>
+    window.addEventListener(ev, touch, { passive: true })
+  );
+  window.setInterval(() => {
+    if (!state.currentHasPin || state.dialog) return;
+    if (Date.now() - state.lastActivity > 5 * 60 * 1000) {
+      showLock("已闲置 5 分钟，输入 PIN 解锁");
+    }
+  }, 30 * 1000);
+}
+
+
+
+async function setPin(pin) {
+  try {
+    const res = await fetch("/api/pin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    state.currentHasPin = data.has_pin;
+    state.dialog = null;
+  } catch (err) {
+    state.dialogError = err.message;
+  }
+}
+
+export async function submitDialog() {
+  const mode = state.dialog && state.dialog.mode;
+  state.dialogError = "";
+  if (mode === "lock" || mode === "switch") {
+    const pin = state.pinInput.trim();
+    if (mode === "switch") {
+      await doSwitch(state.dialog.target, pin);
+    } else {
+      try {
+        const res = await fetch("/api/unlock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "解锁失败");
+        state.dialog = null;
+        await loadAll();
+      } catch (err) {
+        state.dialogError = err.message;
+        state.pinInput = "";
+      }
+    }
+  } else if (mode === "pinSetup") {
+    await setPin(state.pinInput.trim());
+  } else if (mode === "new") {
+    const name = state.newProfileName.trim();
+    if (!name) { state.dialogError = "档案名不能为空"; return; }
+    try {
+      const res = await fetch("/api/profiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "创建失败");
+      state.dialog = null;
+      await doSwitch(name, "");
+    } catch (err) {
+      state.dialogError = err.message;
+    }
+  } else if (mode === "rename") {
+    const name = state.renameName.trim();
+    if (!name) { state.dialogError = "新档案名不能为空"; return; }
+    try {
+      const res = await fetch("/api/profiles/rename", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, pin: state.pinInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "重命名失败");
+      state.dialog = null;
+      await refreshAfterProfileChange(data.current);
+    } catch (err) {
+      state.dialogError = err.message;
+    }
+  } else if (mode === "delete") {
+    if (state.codeInput.trim() !== state.dialog.code) {
+      state.dialogError = "验证码不正确，已取消";
+      state.codeInput = "";
+      return;
+    }
+    try {
+      const res = await fetch(`/api/profiles/${encodeURIComponent(state.currentProfile)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: state.pinInput.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "删除失败");
+      state.dialog = null;
+      await refreshAfterProfileChange(data.current);
+    } catch (err) {
+      state.dialogError = err.message;
+    }
+  }
+}
+
+async function refreshAfterProfileChange(newCurrent) {
+  state.currentProfile = newCurrent;
+  state.currentHasPin = false;
+  state.dialog = null;
+  await loadProfiles();
+  const cur = state.profiles.find((p) => p.name === newCurrent);
+  state.currentHasPin = !!(cur && cur.has_pin);
+  resetForProfileChange();
+  await loadAll();
+}
+
+
+// ================= 初始化 / 数据加载 =================
+
+export function initYearOptions() {
+  const cur = new Date().getFullYear();
+  state.yearOptions = [];
+  for (let y = cur - 5; y <= cur; y++) state.yearOptions.push(y);
+}
+
+export async function loadAll() {
+  try {
+    initYearOptions();
+    state.viewMonth = todayStr().slice(0, 7);   // 默认当年当月
+    await loadDays();
+    await loadCalendar();
+    await loadMemos();
+    await loadLine();
+    const target = state.days.find((d) => d.is_today) || state.days[0];
+    await selectDay(target ? target.date : todayStr());
+  } catch (err) {
+    alert("初始化失败：" + err.message);
+  }
+}
+
+export async function loadLine() {
+  try {
+    const res = await fetch("/api/line");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载点数线失败");
+    state.line = data;
+  } catch (err) {
+    console.error(err);
+    state.line = null;
+  }
+}
+
+export function defaultTsFor(day) {
+  return day === todayStr() ? toLocalInput(new Date()) : `${day}T12:00`;
+}
+
+export async function selectDay(day) {
+  state.selectedDay = day;
+  if (!state.editingId) {
+    state.form.ts = defaultTsFor(day);
+  }
+  await loadEntries();
+  await loadNote();
+}
+
+export async function loadDays() {
+  const month = state.viewMonth || todayStr().slice(0, 7);
+  const res = await fetch(`/api/days?month=${month}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "加载日期失败");
+  state.days = data.days;
+  state.viewMonth = data.month;
+}
+
+function pickMonthDay() {
+  const todayIn = state.days.find((d) => d.is_today);
+  if (todayIn) return todayIn.date;
+  return state.days[state.days.length - 1].date;
+}
+
+async function reloadMonthView() {
+  await loadDays();
+  await selectDay(pickMonthDay());
+}
+
+export async function onYearChange(ev) {
+  const year = ev.target.value;
+  const month = state.viewMonth.slice(5, 7);
+  state.viewMonth = `${year}-${month}`;
+  await reloadMonthView();
+}
+
+export async function onMonthChange(ev) {
+  const month = ev.target.value;
+  const year = state.viewMonth.slice(0, 4);
+  const ym = `${year}-${month}`;
+  const cur = todayStr().slice(0, 7);
+  if (ym > cur) { alert("不能查看未来月份"); return; }
+  state.viewMonth = ym;
+  await reloadMonthView();
+}
+
+export async function shiftMonth(delta) {
+  const d = fromDateStr(state.viewMonth + "-01");
+  d.setMonth(d.getMonth() + delta);
+  const ym = toDateStr(d).slice(0, 7);
+  const cur = todayStr().slice(0, 7);
+  if (ym > cur) { alert("不能查看未来月份"); return; }
+  state.viewMonth = ym;
+  await reloadMonthView();
+}
+
+export async function goToday() {
+  state.viewMonth = todayStr().slice(0, 7);
+  await loadDays();
+  await selectDay(todayStr());
+}
+
+export async function loadEntries() {
+  try {
+    const res = await fetch(`/api/entries?day=${state.selectedDay}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载失败");
+    state.entries = data.entries;
+    state.dayPoints = data.day_points;
+  } catch (err) {
+    console.error(err);
+    alert("加载失败：" + err.message);
+  }
+}
+
+
+export async function loadNote() {
+  try {
+    const res = await fetch(`/api/notes?day=${state.selectedDay}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载感想失败");
+    state.noteDraft = data.note || "";
+    state.hasNote = !!data.note;
+    state.noteEditing = false;
+  } catch (err) {
+    console.error(err);
+    state.noteDraft = "";
+    state.hasNote = false;
+    state.noteEditing = false;
+  }
+}
+
+export function startNoteEdit() {
+  state.noteEditing = true;
+}
+
+export function cancelNoteEdit() {
+  // 丢弃草稿，重新加载已保存内容
+  loadNote();
+}
+
+export async function saveNote() {
+  const content = state.noteDraft.trim();
+  if (!content) {
+    alert("感想不能为空");
+    return;
+  }
+  try {
+    const res = await fetch("/api/notes", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ day: state.selectedDay, content }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    state.noteDraft = data.note;
+    state.hasNote = true;
+    state.noteEditing = false;   // 保存完毕收起编辑框
+  } catch (err) {
+    alert("保存失败：" + err.message);
+  }
+}
+
+export async function deleteNote() {
+  if (!confirm(`删除 ${selectedLabel()} 的整篇感想？`)) return;
+  try {
+    const res = await fetch(`/api/notes?day=${state.selectedDay}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok && res.status !== 404) throw new Error(data.error || "删除失败");
+    state.noteDraft = "";
+    state.hasNote = false;
+    state.noteEditing = false;
+  } catch (err) {
+    alert("删除失败：" + err.message);
+  }
+}
+
+export function stampNote() {
+  const now = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp = `[${p(now.getHours())}:${p(now.getMinutes())}] `;
+  state.noteDraft = state.noteDraft.trimEnd()
+    ? `${state.noteDraft.trimEnd()}\n\n${stamp}`
+    : stamp;
+}
+
+export async function submitEntry() {
+  const payload = {
+    content: state.form.content.trim(),
+    points: Number(state.form.points),
+    category: state.form.category || null,
+  };
+  if (!payload.content) return;
+
+  const tsInput = state.form.ts || defaultTsFor(state.selectedDay);
+  const d = new Date(tsInput);
+  if (Number.isNaN(d.getTime())) {
+    alert("时间格式不正确");
+    return;
+  }
+  payload.ts = d.toISOString();
+
+  const url = state.editingId ? `/api/entries/${state.editingId}` : "/api/entries";
+  const method = state.editingId ? "PUT" : "POST";
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || (state.editingId ? "保存失败" : "提交失败"));
+    endEdit();
+    const ownerDay = dayOf(data.ts);
+    if (ownerDay !== state.selectedDay) {
+      state.selectedDay = ownerDay;
+      state.form.ts = defaultTsFor(ownerDay);
+    }
+    await refresh();
+  } catch (err) {
+    alert("提交失败：" + err.message);
+  }
+}
+
+export function startEdit(entry) {
+  state.editingId = entry.id;
+  state.form.content = entry.content;
+  state.form.points = entry.points;
+  state.form.category = entry.category || "";
+  state.form.ts = toLocalInput(new Date(entry.ts));
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+export function endEdit() {
+  state.editingId = null;
+  state.form.content = "";
+  state.form.points = 1;
+  state.form.category = "";
+  state.form.ts = defaultTsFor(state.selectedDay);
+}
+
+export async function refresh() {
+  await Promise.all([loadEntries(), loadDays(), loadCalendar(), loadNote(), loadLine()]);
+}
+
+export async function delEntry(entry) {
+  if (!confirm(`删除这条记录？\n${entry.content}`)) return;
+  try {
+    const res = await fetch(`/api/entries/${entry.id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "删除失败");
+    await refresh();
+  } catch (err) {
+    alert("删除失败：" + err.message);
+  }
+}
+
+
+// ================= 贡献日历 =================
+
+export async function loadCalendar() {
+  const url = state.calendarYear ? `/api/calendar?year=${state.calendarYear}` : "/api/calendar";
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "加载贡献日历失败");
+  state.calendarDays = data;
+}
+
+export async function prevYear() {
+  const year = (state.calendarYear || currentYear()) - 1;
+  state.calendarYear = year;
+  await loadCalendar();
+}
+
+export async function nextYear() {
+  if (!calCanNext()) return;
+  state.calendarYear += 1;
+  if (state.calendarYear >= currentYear()) state.calendarYear = 0;
+  await loadCalendar();
+}
+
+export async function goCalendarLatest() {
+  state.calendarYear = 0;
+  await loadCalendar();
+}
+
+export function cellTitle(c) {
+  if (!c.inRange) return "";
+  return c.points > 0 ? `${c.date} · ${c.points} 点` : c.date;
+}
+
+// ================= 备忘录 + 主目标 =================
+
+export async function loadMemos() {
+  try {
+    const res = await fetch("/api/memos");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载备忘录失败");
+    state.memos = data.memos;
+    state.mainGoal = data.main_goal || "";
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function addMemo() {
+  const text = state.memoDraft.trim();
+  if (!text) return;
+  try {
+    const res = await fetch("/api/memos", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "添加失败");
+    state.memos.push(data);
+    state.memoDraft = "";
+  } catch (err) {
+    alert("添加失败：" + err.message);
+  }
+}
+
+export async function delMemo(id) {
+  try {
+    const res = await fetch(`/api/memos/${id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "删除失败");
+    state.memos = state.memos.filter((m) => m.id !== id);
+  } catch (err) {
+    alert("删除失败：" + err.message);
+  }
+}
+
+export function startGoalEdit() {
+  state.goalDraft = state.mainGoal;
+  state.goalEditing = true;
+}
+
+export function cancelGoalEdit() {
+  state.goalEditing = false;
+  state.goalDraft = "";
+}
+
+export async function saveGoal() {
+  try {
+    const res = await fetch("/api/main-goal", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goal: state.goalDraft.trim() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    state.mainGoal = data.main_goal || "";
+    state.goalEditing = false;
+  } catch (err) {
+    alert("保存失败：" + err.message);
+  }
+}
+

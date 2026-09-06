@@ -17,14 +17,41 @@
 
 **Windows**：双击 `start.bat`（首次会自动建虚拟环境并装依赖），浏览器自动打开 `http://127.0.0.1:5000/`。
 
-**手动启动**：
+> 页面是前端工程构建产物（`static/dist/`）。若页面提示"前端尚未构建"，先在 `frontend/` 执行：
+
+```powershell
+npm install
+npm run build
+```
+
+**手动启动后端**：
 
 ```powershell
 .\.venv\Scripts\python app.py    # 或先 py -m venv .venv && pip install -r requirements.txt
 ```
 
+## 开发前端
+
+前端源码在 `frontend/`（Vite + Vue 3 单文件组件）。
+
+- **方式一（推荐开发）**：终端 A 跑后端 `python app.py`，终端 B 在 `frontend/` 跑 `npm run dev`，浏览器访问 `http://localhost:5173`（Vite 会把 `/api` 代理到 Flask）。
+- **方式二**：在 `frontend/` 执行 `npm run build`，产物输出到 `static/dist/`，再通过 Flask（5000 端口）访问。
+
+```
+frontend/
+├─ index.html            # 入口壳
+├─ vite.config.js        # 构建配置（产物 → ../static/dist，/api 代理）
+└─ src/
+   ├─ main.js            # 启动 Vue
+   ├─ App.vue            # 根组件
+   ├─ store.js           # 全局状态 + 业务动作
+   ├─ utils.js           # 日期工具 + 日历算法
+   ├─ assets/main.css    # 全局样式
+   └─ components/        # 按功能拆的 .vue 组件
+```
+
 ## 状态
 
-✅ **v1 已完工**（2026-09-05）— 全部验收项通过，详见 `docs/requirements.md`。
+✅ **v1 已完工**（2026-09-05）— 全部验收项通过，详见 `docs/requirements.md`。前端已迁移到 Vite + Vue SFC。
 
 ![status](https://img.shields.io/badge/status-v1%20done-green)

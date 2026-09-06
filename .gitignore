@@ -21,3 +21,7 @@ __pycache__/
 
 # 运行时数据（私人日记，绝不入库）
 data/
+
+# 前端构建产物 + 依赖
+static/dist/
+frontend/node_modules/
