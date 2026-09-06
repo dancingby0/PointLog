@@ -16,32 +16,32 @@ class MemosApiTest(ApiTestCase):
         self.assertEqual(body["main_goal"], "")
 
     def test_create_and_list(self):
-        r = self.client.post("/api/memos", json={"text": "周四打扫寝室"})
+        r = self.client.post("/api/memos", json={"text": "周六和同学约了出去玩"})
         self.assertEqual(r.status_code, 201)
         memo = r.get_json()
         self.assertTrue(memo["id"])
-        self.assertEqual(memo["text"], "周四打扫寝室")
+        self.assertEqual(memo["text"], "周六和同学约了出去玩")
 
         body = self.client.get("/api/memos").get_json()
         self.assertEqual(len(body["memos"]), 1)
-        self.assertEqual(body["memos"][0]["text"], "周四打扫寝室")
+        self.assertEqual(body["memos"][0]["text"], "周六和同学约了出去玩")
 
     def test_empty_text_rejected(self):
         r = self.client.post("/api/memos", json={"text": "   "})
         self.assertEqual(r.status_code, 400)
 
     def test_delete(self):
-        r = self.client.post("/api/memos", json={"text": "作业 deadline"})
+        r = self.client.post("/api/memos", json={"text": "借的书 10月30号前还"})
         mid = r.get_json()["id"]
         self.assertEqual(self.client.delete(f"/api/memos/{mid}").status_code, 200)
         self.assertEqual(self.client.delete(f"/api/memos/{mid}").status_code, 404)
 
     def test_main_goal_set_and_clear(self):
-        r = self.client.put("/api/main-goal", json={"goal": "主攻物理"})
+        r = self.client.put("/api/main-goal", json={"goal": "读完一本书"})
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.get_json()["main_goal"], "主攻物理")
+        self.assertEqual(r.get_json()["main_goal"], "读完一本书")
         # 合并到 /api/memos 返回
-        self.assertEqual(self.client.get("/api/memos").get_json()["main_goal"], "主攻物理")
+        self.assertEqual(self.client.get("/api/memos").get_json()["main_goal"], "读完一本书")
         # 清除
         r = self.client.put("/api/main-goal", json={"goal": ""})
         self.assertEqual(r.get_json()["main_goal"], "")

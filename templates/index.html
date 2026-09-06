@@ -121,7 +121,7 @@
       <input v-model.number="form.points" type="number" min="0" step="1" placeholder="1">
     </label>
     <label>类别（可选）
-      <input v-model.trim="form.category" type="text" maxlength="20" placeholder="例：学习 / ">
+      <input v-model.trim="form.category" type="text" maxlength="20" placeholder="例：学习 / 生活 / 运动">
     </label>
     <label>时间（默认：{{ selectedIsToday ? '现在' : selectedDay + ' 12:00' }}，凌晨4点前算昨日）
       <input v-model="form.ts" type="datetime-local">

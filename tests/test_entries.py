@@ -19,9 +19,9 @@ class EntriesApiTest(ApiTestCase):
 
     def test_create_and_list(self):
         r = self.client.post("/api/entries", json={
-            "content": "背完《岳阳楼记》",
+            "content": "背完30个英语单词",
             "points": 2,
-            "category": "语文",
+            "category": "学习",
         })
         self.assertEqual(r.status_code, 201)
         entry = r.get_json()
@@ -32,7 +32,7 @@ class EntriesApiTest(ApiTestCase):
         body = r.get_json()
         self.assertEqual(len(body["entries"]), 1)
         self.assertEqual(body["day_points"], 2)
-        self.assertEqual(body["entries"][0]["content"], "背完《岳阳楼记》")
+        self.assertEqual(body["entries"][0]["content"], "背完30个英语单词")
 
     def test_points_is_required_int(self):
         r = self.client.post("/api/entries", json={"content": "x", "points": "abc"})
