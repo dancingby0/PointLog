@@ -86,6 +86,39 @@ class AssetsApiTest(ApiTestCase):
         r = self.client.get(f"/api/transactions?account_id={a['id']}")
         self.assertEqual(len(r.get_json()["transactions"]), 2)
 
+    def test_transaction_with_custom_time(self):
+        """补录：可传历史发生时间（datetime-local naive，视为本地时区）。"""
+        from utils import parse_ts
+        acc = self._mk_acct("微信", "asset", 100)
+        r = self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": acc["id"], "amount": 12,
+            "note": "昨天晚上的饭", "ts": "2026-07-03T21:05",
+        })
+        self.assertEqual(r.status_code, 201, r.get_json())
+        ts = r.get_json()["ts"]
+        # 存为本地秒级 ISO，保留用户时刻
+        self.assertEqual(parse_ts(ts), parse_ts("2026-07-03T21:05"))
+        # 默认时间存在时，列表新→旧仍正确（带历史时间的那条更旧）
+        self.client.post("/api/transactions", json={
+            "type": "income", "account_id": acc["id"], "amount": 50, "note": "刚收到",
+        })
+        r = self.client.get("/api/transactions")
+        txs = r.get_json()["transactions"]
+        self.assertEqual(len(txs), 2)
+        self.assertEqual(txs[0]["note"], "刚收到")
+        self.assertEqual(txs[1]["note"], "昨天晚上的饭")
+        # 余额不受时间影响（仍按记账顺序算）
+        body = self.client.get("/api/accounts").get_json()
+        target = next(x for x in body["accounts"] if x["id"] == acc["id"])
+        self.assertEqual(target["balance"], 138)
+
+    def test_transaction_bad_time_rejected(self):
+        acc = self._mk_acct("现金", "asset", 0)
+        r = self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": acc["id"], "amount": 1, "ts": "不是时间",
+        })
+        self.assertEqual(r.status_code, 400)
+
     def test_assets_are_global(self):
         """账户数据是个人级：切档案后仍存在。"""
         self._mk_acct("我的卡", "asset", 66)

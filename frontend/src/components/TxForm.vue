@@ -2,9 +2,19 @@
 // 记账表单：支出 / 收入 / 转账
 import { reactive, ref } from "vue";
 import { state, refreshAssets, loadAccounts } from "../store";
+import { toLocalInput } from "../utils";
 import TagSelect from "./TagSelect.vue";
 
-const form = reactive({ type: "expense", account_id: "", from: "", to: "", amount: "", tag: "", note: "" });
+const form = reactive({
+  type: "expense",
+  account_id: "",
+  from: "",
+  to: "",
+  amount: "",
+  tag: "",
+  note: "",
+  ts: toLocalInput(new Date()),   // 发生时间（默认现在，可改为历史时间）
+});
 const busy = ref(false);
 
 const ASSET_ACCTS = () => state.accounts.filter((a) => a.kind === "asset");
@@ -18,7 +28,7 @@ async function submit() {
     type: form.type,
     amount,
     note: form.note.trim(),
-    ts: undefined,
+    ts: form.ts || undefined,
   };
   if (form.tag.trim()) payload.tags = [form.tag.trim()];
 
@@ -41,6 +51,7 @@ async function submit() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "保存失败");
     form.amount = ""; form.note = ""; form.tag = "";
+    form.ts = toLocalInput(new Date());
     await refreshAssets();
     await loadAccounts();
   } catch (err) {
@@ -100,6 +111,9 @@ async function onAddAssetTag(tag) {
 
     <label class="label-block">金额（¥）
       <input v-model="form.amount" type="number" min="0" step="0.01" placeholder="如 23.50">
+    </label>
+    <label class="label-block">发生时间（可按实际时刻补录）
+      <input v-model="form.ts" type="datetime-local">
     </label>
     <label class="label-block">标签（可选）
       <TagSelect :tags="state.assetTags" v-model="form.tag" @add-tag="onAddAssetTag" />

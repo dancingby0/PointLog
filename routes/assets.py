@@ -131,7 +131,8 @@ def adjust_balance(account_id: str):
         return jsonify({"error": "金额格式不正确"}), 400
     ts_iso = body.get("ts") or _now_iso()
     try:
-        parse_ts(ts_iso)
+        # 统一存为本地时区、秒级 ISO（naive 视为本地时间），与既有 +08:00 数据同构
+        ts_iso = parse_ts(ts_iso).isoformat(timespec="seconds")
     except (ValueError, TypeError):
         return jsonify({"error": "时间格式不正确"}), 400
     note = str(body.get("note", "")).strip()
@@ -174,7 +175,8 @@ def list_transactions():
         ):
             continue
         txs.append(_serialize_tx(t))
-    txs.sort(key=lambda t: t["ts"], reverse=True)
+    # 新→旧；同秒多笔时以记录 id（毫秒，越晚越大）为次级排序
+    txs.sort(key=lambda t: (t["ts"], str(t.get("id") or "")), reverse=True)
     return jsonify({"transactions": txs})
 
 
@@ -210,7 +212,8 @@ def create_transaction():
 
     ts_iso = body.get("ts") or _now_iso()
     try:
-        parse_ts(ts_iso)
+        # 统一存为本地时区、秒级 ISO（naive 视为本地时间），与既有 +08:00 数据同构
+        ts_iso = parse_ts(ts_iso).isoformat(timespec="seconds")
     except (ValueError, TypeError):
         return jsonify({"error": "时间格式不正确"}), 400
     note = str(body.get("note", "")).strip()
