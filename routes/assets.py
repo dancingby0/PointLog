@@ -263,3 +263,45 @@ def create_transaction():
     g["txs"].append(tx)
     data.save_global(g)
     return jsonify(_serialize_tx(tx)), 201
+
+
+@bp.put("/transactions/<tx_id>")
+def update_transaction(tx_id: str):
+    """编辑流水：允许修改发生时间 / 备注 / 标签。
+
+    金额、账户、类型不可直接改（改动会牵动余额历史口径）；
+    如需调整请删除后重记，或用"校准"直接修正余额。
+    """
+    g = data.load_global()
+    tx = next((t for t in g["txs"] if t.get("id") == tx_id), None)
+    if tx is None:
+        return jsonify({"error": "流水不存在"}), 404
+    if tx.get("type") == "adjust":
+        return jsonify({"error": "校准记录不可编辑"}), 400
+
+    body = request.get_json(silent=True) or {}
+    changed = False
+    if "ts" in body:
+        raw = body.get("ts")
+        if not raw:
+            return jsonify({"error": "时间不能为空"}), 400
+        try:
+            # 与新增一致：naive 视为本地，统一存本地秒级 ISO
+            ts_iso = parse_ts(raw).isoformat(timespec="seconds")
+        except (ValueError, TypeError):
+            return jsonify({"error": "时间格式不正确"}), 400
+        tx["ts"] = ts_iso
+        changed = True
+    if "note" in body:
+        tx["note"] = str(body.get("note") or "").strip()
+        changed = True
+    if "tags" in body:
+        tags = body.get("tags") or []
+        if not isinstance(tags, list):
+            tags = [tags]
+        tx["tags"] = [str(x).strip() for x in tags if str(x).strip()]
+        changed = True
+    if not changed:
+        return jsonify(_serialize_tx(tx))
+    data.save_global(g)
+    return jsonify(_serialize_tx(tx))

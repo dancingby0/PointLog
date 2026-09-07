@@ -1,7 +1,7 @@
 <script setup>
-import { computed } from "vue";
-import { state } from "../store";
-import { formatTime } from "../utils";
+import { computed, reactive, ref } from "vue";
+import { state, refreshAssets } from "../store";
+import { formatTime, toLocalInput } from "../utils";
 
 const typeLabel = { expense: "支出", income: "收入", transfer: "转账", adjust: "校准" };
 
@@ -13,6 +13,36 @@ function acctName(id) {
 const txs = computed(() => [...state.txs]);
 
 const fmtMoney = (n) => (Number(n) < 0 ? "-" : "") + "¥" + Math.abs(Number(n)).toFixed(2);
+
+// 行内编辑（只改发生时间 / 备注；校准记录不可编辑）
+const editingId = ref(null);
+const edit = reactive({ ts: "", note: "" });
+
+function startEdit(t) {
+  editingId.value = t.id;
+  edit.ts = toLocalInput(new Date(t.ts));
+  edit.note = t.note || "";
+}
+
+function cancelEdit() {
+  editingId.value = null;
+}
+
+async function saveEdit(t) {
+  try {
+    const res = await fetch(`/api/transactions/${encodeURIComponent(t.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ts: edit.ts, note: edit.note }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    editingId.value = null;
+    await refreshAssets();
+  } catch (err) {
+    alert("保存失败：" + err.message);
+  }
+}
 </script>
 
 <template>
@@ -40,6 +70,19 @@ const fmtMoney = (n) => (Number(n) < 0 ? "-" : "") + "¥" + Math.abs(Number(n)).
         <div class="tx-side">
           <span class="tx-amount" :class="t.type">{{ fmtMoney(t.amount) }}</span>
           <span class="tx-time">{{ formatTime(t.ts) }}</span>
+          <button v-if="t.type !== 'adjust'" type="button" class="ghost tiny"
+                  @click="startEdit(t)" title="修改发生时间 / 备注">✏️ 编辑</button>
+        </div>
+        <div v-if="editingId === t.id" class="tx-edit">
+          <label>发生时间
+            <input v-model="edit.ts" type="datetime-local">
+          </label>
+          <label>备注
+            <input v-model="edit.note" type="text" maxlength="100" placeholder="备注（可留空）">
+          </label>
+          <button type="button" @click="saveEdit(t)">保存</button>
+          <button type="button" class="ghost" @click="cancelEdit">取消</button>
+          <span class="tx-edit-hint">金额 / 账户 / 类型如需调整，请删除后重记（或用"校准"修正余额）</span>
         </div>
       </li>
     </ul>

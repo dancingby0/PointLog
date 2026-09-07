@@ -119,6 +119,41 @@ class AssetsApiTest(ApiTestCase):
         })
         self.assertEqual(r.status_code, 400)
 
+    def test_update_transaction_time_and_note(self):
+        """编辑已有流水：可改发生时间与备注；余额不变。"""
+        from utils import parse_ts
+        acc = self._mk_acct("微信", "asset", 100)
+        r = self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": acc["id"], "amount": 12, "note": "旧备注",
+        })
+        tx_id = r.get_json()["id"]
+        r = self.client.put(f"/api/transactions/{tx_id}", json={
+            "ts": "2026-05-01T08:30", "note": "改到 5 月 1 日",
+        })
+        self.assertEqual(r.status_code, 200, r.get_json())
+        body = r.get_json()
+        self.assertEqual(parse_ts(body["ts"]), parse_ts("2026-05-01T08:30"))
+        self.assertEqual(body["note"], "改到 5 月 1 日")
+        # 仅改时间不动余额
+        r = self.client.get("/api/accounts")
+        target = next(a for a in r.get_json()["accounts"] if a["id"] == acc["id"])
+        self.assertEqual(target["balance"], 88)
+        # 列表返回编辑后内容
+        txs = self.client.get("/api/transactions").get_json()["transactions"]
+        self.assertTrue(any(t["id"] == tx_id and t["note"] == "改到 5 月 1 日" for t in txs))
+
+    def test_update_transaction_not_found(self):
+        r = self.client.put("/api/transactions/nope", json={"ts": "2026-05-01T08:30"})
+        self.assertEqual(r.status_code, 404)
+
+    def test_adjust_record_not_editable(self):
+        acc = self._mk_acct("现金", "asset", 50)
+        self.client.post(f"/api/accounts/{acc['id']}/adjust", json={"balance": 60, "note": "校准"})
+        txs = self.client.get("/api/transactions").get_json()["transactions"]
+        adj = next(t for t in txs if t["type"] == "adjust")
+        r = self.client.put(f"/api/transactions/{adj['id']}", json={"ts": "2026-05-01T08:30"})
+        self.assertEqual(r.status_code, 400)
+
     def test_assets_are_global(self):
         """账户数据是个人级：切档案后仍存在。"""
         self._mk_acct("我的卡", "asset", 66)
