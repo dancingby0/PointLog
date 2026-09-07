@@ -305,3 +305,40 @@ def update_transaction(tx_id: str):
         return jsonify(_serialize_tx(tx))
     data.save_global(g)
     return jsonify(_serialize_tx(tx))
+@bp.delete("/transactions/<tx_id>")
+def delete_transaction(tx_id: str):
+    """删除流水：同步回滚该笔对账户余额的影响。
+
+    支出 → 余额加回；收入 → 扣回；转账 → 两端还原。
+    校准记录不可删（它是余额基准留痕）。删除后余额与剩余流水保持一致；
+    若此前存在校准差额，用户可再校准。
+    """
+    g = data.load_global()
+    tx = next((t for t in g["txs"] if t.get("id") == tx_id), None)
+    if tx is None:
+        return jsonify({"error": "流水不存在"}), 404
+    ttype = tx.get("type")
+    if ttype == "adjust":
+        return jsonify({"error": "校准记录不可删除（保留校准痕迹）"}), 400
+
+    amount_fen = int(tx.get("amount_fen", 0))
+    if ttype == "expense":
+        acc = next((a for a in g["accounts"] if a["id"] == tx.get("account_id")), None)
+        if acc is not None:
+            acc["balance_fen"] += amount_fen
+    elif ttype == "income":
+        acc = next((a for a in g["accounts"] if a["id"] == tx.get("account_id")), None)
+        if acc is not None:
+            acc["balance_fen"] -= amount_fen
+    elif ttype == "transfer":
+        fa = next((a for a in g["accounts"] if a["id"] == tx.get("from_account")), None)
+        ta = next((a for a in g["accounts"] if a["id"] == tx.get("to_account")), None)
+        if fa is not None:
+            fa["balance_fen"] += amount_fen
+        if ta is not None:
+            ta["balance_fen"] -= amount_fen
+
+    g["txs"] = [t for t in g["txs"] if t.get("id") != tx_id]
+    data.save_global(g)
+    return jsonify({"ok": True})
+

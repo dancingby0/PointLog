@@ -442,6 +442,13 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tx-edit input[type="text"] { flex: 1; min-width: 160px; }
 .tx-edit-hint { width: 100%; font-size: 12px; color: var(--muted); }
 
+.tx-ops { display: flex; gap: 6px; }
+.tx-del-warn { width: 100%; color: #b91c1c; font-size: 13px; }
+.tx-del-warn b { color: #b91c1c; }
+.tx-edit button.danger {
+  background: var(--danger, #dc2626); border-color: var(--danger, #dc2626); color: #fff;
+}
+
 /* ---- v2.3 账号 ---- */
 .nav-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .account-pill {

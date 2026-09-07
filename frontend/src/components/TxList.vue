@@ -18,8 +18,28 @@ const fmtMoney = (n) => (Number(n) < 0 ? "-" : "") + "¥" + Math.abs(Number(n)).
 const editingId = ref(null);
 const edit = reactive({ ts: "", note: "" });
 
+// 行内删除（两步确认防误触；校准记录不可删除）
+const confirmDeleteId = ref(null);
+
+function askDelete(t) {
+  confirmDeleteId.value = t.id;
+}
+
+async function deleteTx(t) {
+  try {
+    const res = await fetch(`/api/transactions/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "删除失败");
+    confirmDeleteId.value = null;
+    await refreshAssets();
+  } catch (err) {
+    alert("删除失败：" + err.message);
+  }
+}
+
 function startEdit(t) {
   editingId.value = t.id;
+  confirmDeleteId.value = null;
   edit.ts = toLocalInput(new Date(t.ts));
   edit.note = t.note || "";
 }
@@ -70,8 +90,12 @@ async function saveEdit(t) {
         <div class="tx-side">
           <span class="tx-amount" :class="t.type">{{ fmtMoney(t.amount) }}</span>
           <span class="tx-time">{{ formatTime(t.ts) }}</span>
-          <button v-if="t.type !== 'adjust'" type="button" class="ghost tiny"
-                  @click="startEdit(t)" title="修改发生时间 / 备注">✏️ 编辑</button>
+          <div v-if="t.type !== 'adjust'" class="tx-ops">
+            <button v-if="confirmDeleteId !== t.id" type="button" class="ghost tiny"
+                    @click="startEdit(t)" title="修改发生时间 / 备注">✏️ 编辑</button>
+            <button v-if="confirmDeleteId !== t.id" type="button" class="ghost tiny danger"
+                    @click="askDelete(t)" title="删除该笔并回滚余额">🗑 删除</button>
+          </div>
         </div>
         <div v-if="editingId === t.id" class="tx-edit">
           <label>发生时间
@@ -83,6 +107,12 @@ async function saveEdit(t) {
           <button type="button" @click="saveEdit(t)">保存</button>
           <button type="button" class="ghost" @click="cancelEdit">取消</button>
           <span class="tx-edit-hint">金额 / 账户 / 类型如需调整，请删除后重记（或用"校准"修正余额）</span>
+        </div>
+        <div v-if="confirmDeleteId === t.id" class="tx-edit">
+          <span class="tx-del-warn">⚠️ 将永久删除这笔 {{ typeLabel[t.type] }}（¥{{ Number(t.amount).toFixed(2) }}），并<b>回滚账户余额</b>，不可恢复！</span>
+          <button type="button" class="danger" @click="deleteTx(t)">确认删除</button>
+          <button type="button" class="ghost" @click="confirmDeleteId = null">取消</button>
+          <span class="tx-edit-hint">误记/记错了？删除后余额自动还原这笔影响；有历史差额可用"校准"修正</span>
         </div>
       </li>
     </ul>

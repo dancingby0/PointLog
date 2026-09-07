@@ -154,6 +154,57 @@ class AssetsApiTest(ApiTestCase):
         r = self.client.put(f"/api/transactions/{adj['id']}", json={"ts": "2026-05-01T08:30"})
         self.assertEqual(r.status_code, 400)
 
+    def test_delete_expense_rolls_back_balance(self):
+        """删除支出 → 余额自动加回，流水移除。"""
+        acc = self._mk_acct("微信", "asset", 100)
+        r = self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": acc["id"], "amount": 23.5, "note": "午饭",
+        })
+        tx_id = r.get_json()["id"]
+        # 删前余额 76.5
+        r = self.client.get("/api/accounts")
+        self.assertEqual(next(a for a in r.get_json()["accounts"] if a["id"] == acc["id"])["balance"], 76.5)
+        r = self.client.delete(f"/api/transactions/{tx_id}")
+        self.assertEqual(r.status_code, 200, r.get_json())
+        # 余额还原到 100，流水为空
+        r = self.client.get("/api/accounts")
+        self.assertEqual(next(a for a in r.get_json()["accounts"] if a["id"] == acc["id"])["balance"], 100)
+        txs = self.client.get("/api/transactions").get_json()["transactions"]
+        self.assertFalse(any(t["id"] == tx_id for t in txs))
+
+    def test_delete_income_and_transfer_rollback(self):
+        """收入删除扣回；转账删除两端还原。"""
+        a = self._mk_acct("银行卡", "asset", 500)
+        b = self._mk_acct("微信", "asset", 0)
+        # 收入 200
+        r1 = self.client.post("/api/transactions", json={"type": "income", "account_id": a["id"], "amount": 200})
+        # 转账 100 A→B
+        r2 = self.client.post("/api/transactions", json={
+            "type": "transfer", "from": a["id"], "to": b["id"], "amount": 100})
+        body = self.client.get("/api/accounts").get_json()
+        by_id = {x["id"]: x for x in body["accounts"]}
+        self.assertEqual(by_id[a["id"]]["balance"], 600)
+        self.assertEqual(by_id[b["id"]]["balance"], 100)
+        # 删除收入 → A 600 → 400；再删转账 → A 400 → 500、B 100 → 0
+        self.client.delete(f"/api/transactions/{r1.get_json()['id']}")
+        body = self.client.get("/api/accounts").get_json()
+        by_id = {x["id"]: x for x in body["accounts"]}
+        self.assertEqual(by_id[a["id"]]["balance"], 400)
+        self.client.delete(f"/api/transactions/{r2.get_json()['id']}")
+        body = self.client.get("/api/accounts").get_json()
+        by_id = {x["id"]: x for x in body["accounts"]}
+        self.assertEqual(by_id[a["id"]]["balance"], 500)
+        self.assertEqual(by_id[b["id"]]["balance"], 0)
+
+    def test_delete_validation(self):
+        self.assertEqual(self.client.delete("/api/transactions/nope").status_code, 404)
+        acc = self._mk_acct("现金", "asset", 10)
+        self.client.post(f"/api/accounts/{acc['id']}/adjust", json={"balance": 15, "note": "校准"})
+        txs = self.client.get("/api/transactions").get_json()["transactions"]
+        adj = next(t for t in txs if t["type"] == "adjust")
+        r = self.client.delete(f"/api/transactions/{adj['id']}")
+        self.assertEqual(r.status_code, 400)
+
     def test_assets_are_global(self):
         """账户数据是个人级：切档案后仍存在。"""
         self._mk_acct("我的卡", "asset", 66)
