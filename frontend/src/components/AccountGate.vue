@@ -1,6 +1,6 @@
 <script setup>
-// 账号门禁：未登录时显示的账号选择/登录/新建页
-import { reactive, ref } from "vue";
+// 账号门禁：未登录时显示的账号选择/登录/新建页；锁定后显示解锁（输入账号 PIN）
+import { onMounted, reactive, ref } from "vue";
 import {
   state,
   loginAccount,
@@ -14,6 +14,14 @@ const showNew = ref(false);
 const newForm = reactive({ name: "", pin: "", confirmPin: "" });
 const errMsg = ref("");
 const busy = ref(false);
+
+// 被锁定后进入门禁 → 自动定位到被锁账号的 PIN 输入（解锁）
+onMounted(() => {
+  if (state.lockHint && state.lockHint.account && !selected.value) {
+    selected.value = state.lockHint.account;
+    pinInput.value = "";
+  }
+});
 
 async function pick(account) {
   selected.value = account.name;
@@ -53,6 +61,7 @@ async function cancelPick() {
   selected.value = null;
   pinInput.value = "";
   errMsg.value = "";
+  state.lockHint = null;   // 不想解锁当前账号 → 退出锁定视图，回账号列表可切换
   await initAuth();
 }
 </script>
@@ -62,14 +71,14 @@ async function cancelPick() {
     <h1>🎯 PointLog</h1>
     <p class="muted" style="margin:0 0 18px">选择账号开始记录</p>
 
-    <!-- 登录 PIN 输入 -->
+    <!-- 登录 PIN 输入（含锁定解锁） -->
     <div v-if="selected" class="gate-card">
-      <h2>登录「{{ selected }}」</h2>
+      <h2>{{ state.lockHint?.account === selected ? '🔒 已锁定「' + selected + '」' : '登录「' + selected + '」' }}</h2>
       <input v-model="pinInput" type="password" inputmode="numeric" maxlength="8"
-             placeholder="输入账号 PIN" @keyup.enter="confirmPin">
+             :placeholder="state.lockHint?.account === selected ? '输入账号 PIN 解锁' : '输入账号 PIN'" @keyup.enter="confirmPin">
       <p class="lock-err">{{ errMsg }}</p>
       <div class="gate-actions">
-        <button type="button" @click="confirmPin" :disabled="busy">登录</button>
+        <button type="button" @click="confirmPin" :disabled="busy">{{ state.lockHint?.account === selected ? '解锁' : '登录' }}</button>
         <button type="button" class="ghost" @click="cancelPick">返回</button>
       </div>
     </div>

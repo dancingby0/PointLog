@@ -40,6 +40,7 @@ export const state = reactive({
   currentAccount: "",      // 当前本地账号名
   accountHasPin: false,    // 当前账号是否有锁
   unlockedAccount: "",     // 免输窗口内账号名（服务端内存态）
+  lockHint: null,          // 锁定信息 {account, has_pin}（null=未锁定）
   authAccounts: [],        // 账号列表 [{name, has_pin, auto_login}]
   autoLogin: false,        // 自动登录开关
   dialog: null,           // {mode, tip, code?, target?}
@@ -115,10 +116,29 @@ export async function loginAccount(name, pin = "") {
     if (!res.ok) throw new Error(data.error || "登录失败");
     state.currentAccount = data.account;
     state.currentProfile = data.profile;
+    state.lockHint = null;  // 解锁/登录成功 → 清除锁定提示
     await initAuth();
     resetForProfileChange();
     await loadProfiles();
     await loadAll();
+    return true;
+  } catch (err) {
+    state.dialogError = err.message;
+    return false;
+  }
+}
+
+export async function lockAccount() {
+  try {
+    const res = await fetch("/api/auth/lock", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "锁定失败");
+    state.currentAccount = "";
+    state.currentProfile = "";
+    state.accountHasPin = false;
+    state.lockHint = data;   // {account, has_pin} → 前端显示解锁界面
+    resetForProfileChange();
+    await initAuth();
     return true;
   } catch (err) {
     state.dialogError = err.message;
@@ -134,6 +154,7 @@ export async function logoutAccount() {
     state.currentAccount = "";
     state.currentProfile = "";
     state.accountHasPin = false;
+    state.lockHint = null;
     resetForProfileChange();
     await initAuth();
   } catch (err) {

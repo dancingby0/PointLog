@@ -156,6 +156,24 @@ def set_auto_login():
     return jsonify({"auto_login": enabled, "current": meta.get("current", "")})
 
 
+@bp.post("/lock")
+def lock_account_api():
+    """主动/闲置锁定：结束会话并清空免输窗口，须重新输账号 PIN 才可进入。
+
+    返回锁定的账号名与其是否设 PIN，供前端直接显示解锁界面。
+    """
+    if not config.CURRENT_ACCOUNT:
+        return jsonify({"error": "未登录"}), 401
+    name = config.CURRENT_ACCOUNT
+    has_pin = _has_account_pin(name)
+    config.CURRENT_ACCOUNT = ""
+    config.CURRENT_PROFILE = "default"
+    config.UNLOCKED_ACCOUNT = ""   # 立即终止免输窗口 → 解锁必须输 PIN
+    config.UNLOCKED_UNTIL = 0.0
+    config.AUTO_LOGIN_SUPPRESSED = True
+    return jsonify({"account": name, "has_pin": has_pin})
+
+
 @bp.put("/rename")
 def rename_account_api():
     """当前账号改名。body {name, pin?}；设了 PIN 的账号需验证 PIN。

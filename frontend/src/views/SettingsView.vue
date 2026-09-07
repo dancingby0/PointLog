@@ -6,6 +6,7 @@ import {
   logoutAccount,
   deleteAccount,
   renameAccount,
+  lockAccount,
   setAutoLogin,
   setAccountPin,
 } from "../store";
@@ -130,6 +131,7 @@ async function saveAccountPin() {
       </div>
 
       <div class="set-row danger-zone">
+        <button type="button" class="ghost" v-if="state.accountHasPin" @click="lockAccount" title="立即锁定，需输入账号 PIN 解锁">🔒 锁定</button>
         <button type="button" class="ghost" @click="openLogout">登出当前账号</button>
         <button type="button" class="ghost danger" @click="openDelete">注销当前账号</button>
       </div>

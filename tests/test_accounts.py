@@ -137,6 +137,32 @@ class AccountsApiTest(ApiTestCase):
         body = self.client.get("/api/auth").get_json()
         self.assertEqual(body["logged_in"], "")
 
+    def test_lock_ends_session_and_window(self):
+        """锁定 = 结束会话 + 清免输窗口 + 不再自动登录；解锁需重新输 PIN。"""
+        self._mk("锁Q", "1234")
+        self.client.post("/api/auth/login", json={"name": "锁Q", "pin": "1234"})
+        self.assertGreater(config.UNLOCKED_UNTIL, time.time())
+        r = self.client.post("/api/auth/lock")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json(), {"account": "锁Q", "has_pin": True})
+        self.assertEqual(config.CURRENT_ACCOUNT, "")
+        self.assertEqual(config.UNLOCKED_ACCOUNT, "")
+        self.assertEqual(config.UNLOCKED_UNTIL, 0.0)
+        self.assertTrue(config.AUTO_LOGIN_SUPPRESSED)
+        # 锁定后 GET：不在窗口内、不自动登录
+        body = self.client.get("/api/auth").get_json()
+        self.assertEqual(body["logged_in"], "")
+        self.assertEqual(body["unlocked"], "")
+        # 免输窗口已清 → 不带 PIN 无法直接回
+        r = self.client.post("/api/auth/login", json={"name": "锁Q"})
+        self.assertEqual(r.status_code, 401)
+        r = self.client.post("/api/auth/login", json={"name": "锁Q", "pin": "1234"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_lock_requires_session(self):
+        r = self.client.post("/api/auth/lock")
+        self.assertEqual(r.status_code, 401)
+
     def test_logout_suppresses_auto_login(self):
         """回归：开启自动登录后点登出，应停在账号选择页而非立刻被拉回。"""
         self._mk("乙")
