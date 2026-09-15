@@ -1,8 +1,8 @@
 <script setup>
 // 资产统计：账户/标签/收支/日期多筛选 + 粒度可调；折线（收入支出趋势）+ 饼图（标签占比）
-import { computed, onMounted, reactive } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import EChart from "../components/EChart.vue";
-import { state, loadAssetAnalysis } from "../store";
+import { state, refreshAssets, loadAssetAnalysis } from "../store";
 import { toDateStr } from "../utils";
 
 const GRANS = [
@@ -134,7 +134,14 @@ const hasExpenseData = computed(() => (state.assetStats?.tag_expense || []).leng
 
 const money = (n) => "¥" + Number(n || 0).toFixed(2);
 
-onMounted(refresh);
+// 本页是独立路由：先确保账户/标签/流水等基础数据已加载（否则筛选区会误显示"还没有账户"）
+const baseLoaded = ref(false);
+
+onMounted(async () => {
+  await refreshAssets();
+  baseLoaded.value = true;
+  await refresh();
+});
 </script>
 
 <template>
@@ -173,6 +180,7 @@ onMounted(refresh);
                     :class="{ on: filters.accounts.includes(a.id) }"
                     @click="toggleItem('accounts', a.id)">{{ a.name }}</button>
           </template>
+          <span v-else-if="!baseLoaded" class="muted">加载中…</span>
           <span v-else class="muted">（还没有账户）</span>
           <span class="muted">可多选；不选=不限</span>
         </div>
@@ -183,6 +191,7 @@ onMounted(refresh);
                     :class="{ on: filters.tags.includes(t) }"
                     @click="toggleItem('tags', t)">{{ t }}</button>
           </template>
+          <span v-else-if="!baseLoaded" class="muted">加载中…</span>
           <span v-else class="muted">（还没有标签）</span>
           <span class="muted">可多选；不选=不限</span>
         </div>
