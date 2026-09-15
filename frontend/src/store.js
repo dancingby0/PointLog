@@ -17,7 +17,11 @@ export const state = reactive({
   assetTags: [],          // 资产标签池（个人级）
   accounts: [],           // 账户列表
   totalAssets: 0,         // 个人总资产
-  txs: [],                // 流水列表
+  txs: [],                // 流水列表（当前筛选+分页结果）
+  txFilters: { from: "", to: "", channels: [], types: [] },  // 流水筛选（全空=不筛选）
+  txPage: 1,              // 流水当前页
+  txPageSize: 20,         // 流水每页条数
+  txTotal: 0,             // 流水筛选后总条数
   statsSummary: null,     // 统计：坚持与概况
   statsRange: "month",    // 统计时间范围
   statsTrend: [],         // 统计：月度趋势
@@ -797,16 +801,59 @@ export async function loadAccounts() {
   }
 }
 
-export async function loadTxs(accountId = "") {
+export async function loadTxs() {
   try {
-    const q = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
-    const res = await fetch(`/api/transactions${q}`);
+    const p = new URLSearchParams();
+    const f = state.txFilters;
+    if (f.from) p.set("from", f.from);
+    if (f.to) p.set("to", f.to);
+    if (f.channels.length) p.set("channels", f.channels.join(","));
+    if (f.types.length) p.set("types", f.types.join(","));
+    p.set("page", String(state.txPage));
+    p.set("page_size", String(state.txPageSize));
+    const res = await fetch(`/api/transactions?${p.toString()}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "加载流水失败");
     state.txs = data.transactions;
+    state.txTotal = data.total;
+    state.txPage = data.page;
+    state.txPageSize = data.page_size;
   } catch (err) {
     console.error(err);
   }
+}
+
+// ---- 流水筛选 / 分页 ----
+export async function setTxFilters(patch) {
+  Object.assign(state.txFilters, patch);
+  state.txPage = 1;
+  await loadTxs();
+}
+
+export async function toggleTxFilterItem(key, value) {
+  const arr = state.txFilters[key];
+  const i = arr.indexOf(value);
+  if (i >= 0) arr.splice(i, 1);
+  else arr.push(value);
+  state.txPage = 1;
+  await loadTxs();
+}
+
+export async function resetTxFilters() {
+  state.txFilters = { from: "", to: "", channels: [], types: [] };
+  state.txPage = 1;
+  await loadTxs();
+}
+
+export async function setTxPage(page) {
+  state.txPage = Math.max(1, page);
+  await loadTxs();
+}
+
+export async function setTxPageSize(size) {
+  state.txPageSize = size;
+  state.txPage = 1;
+  await loadTxs();
 }
 
 export async function loadAssetTags() {
@@ -821,8 +868,8 @@ export async function loadAssetTags() {
   }
 }
 
-export async function refreshAssets(accountId = "") {
-  await Promise.all([loadAccounts(), loadTxs(accountId), loadAssetTags()]);
+export async function refreshAssets() {
+  await Promise.all([loadAccounts(), loadTxs(), loadAssetTags()]);
 }
 
 

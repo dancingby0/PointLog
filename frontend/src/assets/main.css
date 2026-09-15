@@ -444,6 +444,27 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .tx-ops { display: flex; gap: 6px; }
 .tx-del-warn { width: 100%; color: #b91c1c; font-size: 13px; }
+
+/* ---- 流水筛选栏 + 分页 ---- */
+.tx-filters {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 0 0 12px; padding-bottom: 10px; border-bottom: 1px dashed var(--border);
+}
+.tx-filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.tx-filter-row input[type="date"] { width: auto; padding: 4px 8px; }
+.tx-filter-label { color: var(--muted); min-width: 32px; }
+button.chip {
+  border: 1px solid var(--border); background: #fff; color: var(--text);
+  border-radius: 999px; padding: 2px 12px; font-size: 13px; cursor: pointer; margin: 0;
+}
+button.chip:hover { background: #f0f2f5; }
+button.chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tx-pager {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 12px; justify-content: flex-end;
+}
+.tx-pager select { width: auto; }
+.tx-pager button:disabled { opacity: .45; cursor: not-allowed; }
 .tx-del-warn b { color: #b91c1c; }
 .tx-edit button.danger {
   background: var(--danger, #dc2626); border-color: var(--danger, #dc2626); color: #fff;

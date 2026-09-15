@@ -161,12 +161,39 @@ def adjust_balance(account_id: str):
                     "balance": _fen_to_yuan(new_bal)})
 
 
+def _csv_ids(value) -> list:
+    """把 "a,b,c" 解析为去空列表（多渠道/多类型参数）。"""
+    return [x.strip() for x in (value or "").split(",") if x.strip()]
+
+
 @bp.get("/transactions")
 def list_transactions():
-    """流水列表：?account_id 过滤，默认返回全部（新→旧）。"""
+    """流水列表（新→旧）：支持筛选与分页。
+
+    查询参数：
+      account_id    单账户过滤（兼容旧接口）
+      channels      渠道多选：账户 id，逗号分隔（转账任一端匹配即算）
+      types         类型多选：expense/income/transfer/adjust，逗号分隔
+      from / to     发生日期区间 YYYY-MM-DD（含端点，按本地日期）
+      page/page_size 页码（缺省则不分页、返回全部）
+    返回 {transactions, total, page, page_size}
+    """
     g = data.load_global()
-    account_id = request.args.get("account_id")
-    txs = []
+    account_id = (request.args.get("account_id") or "").strip()
+    channels = _csv_ids(request.args.get("channels"))
+    types = _csv_ids(request.args.get("types"))
+    date_from = (request.args.get("from") or "").strip()
+    date_to = (request.args.get("to") or "").strip()
+
+    try:
+        d_from = dt.date.fromisoformat(date_from) if date_from else None
+        d_to = dt.date.fromisoformat(date_to) if date_to else None
+    except ValueError:
+        return jsonify({"error": "日期格式应为 YYYY-MM-DD"}), 400
+    if d_from and d_to and d_from > d_to:
+        return jsonify({"error": "起始日期不能晚于结束日期"}), 400
+
+    rows = []
     for t in g["txs"]:
         if account_id and not (
             t.get("account_id") == account_id
@@ -174,10 +201,47 @@ def list_transactions():
             or t.get("to_account") == account_id
         ):
             continue
-        txs.append(_serialize_tx(t))
+        if channels:
+            involved = {t.get("account_id"), t.get("from_account"), t.get("to_account")}
+            involved.discard(None)
+            if not (involved & set(channels)):
+                continue
+        if types and t.get("type") not in types:
+            continue
+        if d_from or d_to:
+            try:
+                day = parse_ts(t.get("ts")).astimezone().date()
+            except (ValueError, TypeError):
+                continue
+            if d_from and day < d_from:
+                continue
+            if d_to and day > d_to:
+                continue
+        rows.append(_serialize_tx(t))
+
     # 新→旧；同秒多笔时以记录 id（毫秒，越晚越大）为次级排序
-    txs.sort(key=lambda t: (t["ts"], str(t.get("id") or "")), reverse=True)
-    return jsonify({"transactions": txs})
+    rows.sort(key=lambda t: (t["ts"], str(t.get("id") or "")), reverse=True)
+    total = len(rows)
+
+    page_raw = request.args.get("page")
+    if page_raw:
+        try:
+            page = max(1, int(page_raw))
+            size = int(request.args.get("page_size") or 20)
+        except ValueError:
+            return jsonify({"error": "分页参数不正确"}), 400
+        size = max(1, min(size, 200))
+        start = (page - 1) * size
+        items = rows[start:start + size]
+    else:
+        page, size, items = 1, total, rows
+
+    return jsonify({
+        "transactions": items,
+        "total": total,
+        "page": page,
+        "page_size": size,
+    })
 
 
 def _serialize_tx(t: dict) -> dict:

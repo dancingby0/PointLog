@@ -205,6 +205,97 @@ class AssetsApiTest(ApiTestCase):
         r = self.client.delete(f"/api/transactions/{adj['id']}")
         self.assertEqual(r.status_code, 400)
 
+    def _seed_for_filter(self):
+        """两账户 + 4 笔跨日期/类型/渠道的流水（用于筛选与分页测试）。"""
+        a = self._mk_acct("微信", "asset", 1000)
+        b = self._mk_acct("支付宝", "asset", 1000)
+        self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": a["id"], "amount": 10, "note": "当天微信支出",
+            "ts": "2026-09-15T10:00"})
+        self.client.post("/api/transactions", json={
+            "type": "income", "account_id": a["id"], "amount": 20, "note": "当天微信收入",
+            "ts": "2026-09-15T12:00"})
+        self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": b["id"], "amount": 30, "note": "前日支付宝支出",
+            "ts": "2026-09-14T09:00"})
+        self.client.post("/api/transactions", json={
+            "type": "transfer", "from": a["id"], "to": b["id"], "amount": 5, "note": "前日转账",
+            "ts": "2026-09-14T20:00"})
+        return a, b
+
+    def _get_txs(self, query=""):
+        return self.client.get(f"/api/transactions{query}").get_json()
+
+    def test_transactions_default_no_filter(self):
+        """默认不筛选：返回全部（新→旧）并带 total。"""
+        self._seed_for_filter()
+        body = self._get_txs()
+        self.assertEqual(body["total"], 4)
+        self.assertEqual(len(body["transactions"]), 4)
+        self.assertEqual(body["transactions"][0]["note"], "当天微信收入")
+
+    def test_transactions_filter_by_date(self):
+        """日期区间筛选（单日 = from 与 to 相同）。"""
+        self._seed_for_filter()
+        body = self._get_txs("?from=2026-09-15&to=2026-09-15")
+        self.assertEqual(body["total"], 2)
+        self.assertTrue(all(t["note"].startswith("当天") for t in body["transactions"]))
+        # 开区间：只给 from
+        body = self._get_txs("?from=2026-09-15")
+        self.assertEqual(body["total"], 2)
+
+    def test_transactions_filter_by_channel_multi(self):
+        """渠道多选：转账任一端匹配即算。"""
+        a, b = self._seed_for_filter()
+        body = self._get_txs(f"?channels={a['id']}")
+        self.assertEqual(body["total"], 3)   # 微信两笔 + 转账（微信端）
+        body = self._get_txs(f"?channels={a['id']},{b['id']}")
+        self.assertEqual(body["total"], 4)
+        body = self._get_txs(f"?channels={b['id']}")
+        self.assertEqual(body["total"], 2)   # 支付宝支出 + 转账
+
+    def test_transactions_filter_by_type_multi(self):
+        self._seed_for_filter()
+        self.assertEqual(self._get_txs("?types=expense")["total"], 2)
+        self.assertEqual(self._get_txs("?types=expense,income")["total"], 3)
+        self.assertEqual(self._get_txs("?types=transfer")["total"], 1)
+
+    def test_transactions_filter_combined(self):
+        """组合筛选：日期 + 渠道（如 9月15日 且 微信）。"""
+        a, b = self._seed_for_filter()
+        body = self._get_txs(f"?from=2026-09-15&to=2026-09-15&channels={a['id']}")
+        self.assertEqual(body["total"], 2)
+        body = self._get_txs(f"?from=2026-09-15&to=2026-09-15&channels={b['id']}")
+        self.assertEqual(body["total"], 0)
+        body = self._get_txs(f"?from=2026-09-15&to=2026-09-15&types=expense")
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["transactions"][0]["note"], "当天微信支出")
+
+    def test_transactions_pagination(self):
+        """分页：page/page_size 切页；total 为筛选后总数。"""
+        self._seed_for_filter()
+        p1 = self._get_txs("?page=1&page_size=2")
+        self.assertEqual(p1["total"], 4)
+        self.assertEqual(p1["page"], 1)
+        self.assertEqual(len(p1["transactions"]), 2)
+        self.assertEqual(p1["transactions"][0]["note"], "当天微信收入")
+        p2 = self._get_txs("?page=2&page_size=2")
+        self.assertEqual(p2["page"], 2)
+        self.assertEqual([t["note"] for t in p2["transactions"]], ["前日转账", "前日支付宝支出"])
+        p3 = self._get_txs("?page=3&page_size=2")
+        self.assertEqual(p3["transactions"], [])
+        # 分页与筛选叠加
+        body = self._get_txs("?types=expense&page=1&page_size=1")
+        self.assertEqual(body["total"], 2)
+        self.assertEqual(len(body["transactions"]), 1)
+        self.assertEqual(body["transactions"][0]["note"], "当天微信支出")
+
+    def test_transactions_bad_filter_params(self):
+        self.assertEqual(self.client.get("/api/transactions?from=2026/09/15").status_code, 400)
+        self.assertEqual(
+            self.client.get("/api/transactions?from=2026-09-16&to=2026-09-15").status_code, 400)
+        self.assertEqual(self.client.get("/api/transactions?page=abc").status_code, 400)
+
     def test_assets_are_global(self):
         """账户数据是个人级：切档案后仍存在。"""
         self._mk_acct("我的卡", "asset", 66)
