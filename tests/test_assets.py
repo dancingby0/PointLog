@@ -206,18 +206,18 @@ class AssetsApiTest(ApiTestCase):
         self.assertEqual(r.status_code, 400)
 
     def _seed_for_filter(self):
-        """两账户 + 4 笔跨日期/类型/渠道的流水（用于筛选与分页测试）。"""
+        """两账户 + 4 笔跨日期/类型/渠道/标签的流水（用于筛选与分页测试）。"""
         a = self._mk_acct("微信", "asset", 1000)
         b = self._mk_acct("支付宝", "asset", 1000)
         self.client.post("/api/transactions", json={
             "type": "expense", "account_id": a["id"], "amount": 10, "note": "当天微信支出",
-            "ts": "2026-09-15T10:00"})
+            "tags": ["餐饮"], "ts": "2026-09-15T10:00"})
         self.client.post("/api/transactions", json={
             "type": "income", "account_id": a["id"], "amount": 20, "note": "当天微信收入",
-            "ts": "2026-09-15T12:00"})
+            "tags": ["工资"], "ts": "2026-09-15T12:00"})
         self.client.post("/api/transactions", json={
             "type": "expense", "account_id": b["id"], "amount": 30, "note": "前日支付宝支出",
-            "ts": "2026-09-14T09:00"})
+            "tags": ["餐饮", "交通"], "ts": "2026-09-14T09:00"})
         self.client.post("/api/transactions", json={
             "type": "transfer", "from": a["id"], "to": b["id"], "amount": 5, "note": "前日转账",
             "ts": "2026-09-14T20:00"})
@@ -260,8 +260,22 @@ class AssetsApiTest(ApiTestCase):
         self.assertEqual(self._get_txs("?types=expense,income")["total"], 3)
         self.assertEqual(self._get_txs("?types=transfer")["total"], 1)
 
+    def test_transactions_filter_by_tag_multi(self):
+        """标签多选：命中任一标签即算；并返回可筛选标签集合。"""
+        self._seed_for_filter()
+        body = self._get_txs("?tags=%E9%A4%90%E9%A5%AE")            # 餐饮
+        self.assertEqual(body["total"], 2)
+        body = self._get_txs("?tags=%E9%A4%90%E9%A5%AE,%E5%B7%A5%E8%B5%84")  # 餐饮,工资
+        self.assertEqual(body["total"], 3)
+        body = self._get_txs("?tags=%E4%BA%A4%E9%80%9A")            # 交通
+        self.assertEqual(body["total"], 1)
+        # 可筛选标签（全部出现过，去重）
+        body = self._get_txs()
+        self.assertEqual(set(body["available_tags"]), {"餐饮", "工资", "交通"})
+
     def test_transactions_filter_combined(self):
-        """组合筛选：日期 + 渠道（如 9月15日 且 微信）。"""
+        """组合筛选：日期 + 渠道 + 标签（如 9月15日 且 微信）。"""
+        from urllib.parse import quote
         a, b = self._seed_for_filter()
         body = self._get_txs(f"?from=2026-09-15&to=2026-09-15&channels={a['id']}")
         self.assertEqual(body["total"], 2)
@@ -270,6 +284,15 @@ class AssetsApiTest(ApiTestCase):
         body = self._get_txs(f"?from=2026-09-15&to=2026-09-15&types=expense")
         self.assertEqual(body["total"], 1)
         self.assertEqual(body["transactions"][0]["note"], "当天微信支出")
+        # 日期 + 标签
+        body = self._get_txs(f"?from=2026-09-15&to=2026-09-15&tags={quote('餐饮')}")
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["transactions"][0]["note"], "当天微信支出")
+        # 日期 + 渠道 + 标签 三条件组合
+        body = self._get_txs(
+            f"?from=2026-09-14&to=2026-09-14&channels={b['id']}&tags={quote('交通')}")
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["transactions"][0]["note"], "前日支付宝支出")
 
     def test_transactions_pagination(self):
         """分页：page/page_size 切页；total 为筛选后总数。"""

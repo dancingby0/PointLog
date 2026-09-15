@@ -32,6 +32,7 @@ const fmtMoney = (n) => (Number(n) < 0 ? "-" : "") + "¥" + Math.abs(Number(n)).
 const hasFilter = computed(() => !!(
   state.txFilters.from || state.txFilters.to
   || state.txFilters.channels.length || state.txFilters.types.length
+  || state.txFilters.tags.length
 ));
 const totalPages = computed(() => Math.max(1, Math.ceil(state.txTotal / state.txPageSize)));
 
@@ -124,6 +125,13 @@ async function saveEdit(t) {
         <button v-for="opt in TYPE_OPTS" :key="opt.value" type="button" class="chip"
                 :class="{ on: state.txFilters.types.includes(opt.value) }"
                 @click="toggleTxFilterItem('types', opt.value)">{{ opt.label }}</button>
+        <span class="muted">可多选；不选=不限</span>
+      </div>
+      <div class="tx-filter-row" v-if="state.txTags.length">
+        <span class="tx-filter-label">标签</span>
+        <button v-for="tg in state.txTags" :key="tg" type="button" class="chip"
+                :class="{ on: state.txFilters.tags.includes(tg) }"
+                @click="toggleTxFilterItem('tags', tg)">{{ tg }}</button>
         <span class="muted">可多选；不选=不限</span>
       </div>
     </div>

@@ -174,14 +174,16 @@ def list_transactions():
       account_id    单账户过滤（兼容旧接口）
       channels      渠道多选：账户 id，逗号分隔（转账任一端匹配即算）
       types         类型多选：expense/income/transfer/adjust，逗号分隔
+      tags          标签多选：命中任一标签即算（逗号分隔）
       from / to     发生日期区间 YYYY-MM-DD（含端点，按本地日期）
       page/page_size 页码（缺省则不分页、返回全部）
-    返回 {transactions, total, page, page_size}
+    返回 {transactions, total, page, page_size, available_tags}
     """
     g = data.load_global()
     account_id = (request.args.get("account_id") or "").strip()
     channels = _csv_ids(request.args.get("channels"))
     types = _csv_ids(request.args.get("types"))
+    tags = _csv_ids(request.args.get("tags"))
     date_from = (request.args.get("from") or "").strip()
     date_to = (request.args.get("to") or "").strip()
 
@@ -207,6 +209,8 @@ def list_transactions():
             if not (involved & set(channels)):
                 continue
         if types and t.get("type") not in types:
+            continue
+        if tags and not (set(t.get("tags") or []) & set(tags)):
             continue
         if d_from or d_to:
             try:
@@ -236,11 +240,15 @@ def list_transactions():
     else:
         page, size, items = 1, total, rows
 
+    # 可供筛选的标签集合（全部流水出现过的标签，不受当前筛选影响）
+    available_tags = sorted({tg for t in g["txs"] for tg in (t.get("tags") or []) if tg})
+
     return jsonify({
         "transactions": items,
         "total": total,
         "page": page,
         "page_size": size,
+        "available_tags": available_tags,
     })
 
 

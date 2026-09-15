@@ -18,7 +18,8 @@ export const state = reactive({
   accounts: [],           // 账户列表
   totalAssets: 0,         // 个人总资产
   txs: [],                // 流水列表（当前筛选+分页结果）
-  txFilters: { from: "", to: "", channels: [], types: [] },  // 流水筛选（全空=不筛选）
+  txFilters: { from: "", to: "", channels: [], types: [], tags: [] },  // 流水筛选（全空=不筛选）
+  txTags: [],             // 可筛选标签（流水实际出现过的）
   txPage: 1,              // 流水当前页
   txPageSize: 20,         // 流水每页条数
   txTotal: 0,             // 流水筛选后总条数
@@ -809,6 +810,7 @@ export async function loadTxs() {
     if (f.to) p.set("to", f.to);
     if (f.channels.length) p.set("channels", f.channels.join(","));
     if (f.types.length) p.set("types", f.types.join(","));
+    if (f.tags.length) p.set("tags", f.tags.join(","));
     p.set("page", String(state.txPage));
     p.set("page_size", String(state.txPageSize));
     const res = await fetch(`/api/transactions?${p.toString()}`);
@@ -818,6 +820,7 @@ export async function loadTxs() {
     state.txTotal = data.total;
     state.txPage = data.page;
     state.txPageSize = data.page_size;
+    state.txTags = data.available_tags || [];
   } catch (err) {
     console.error(err);
   }
@@ -840,7 +843,7 @@ export async function toggleTxFilterItem(key, value) {
 }
 
 export async function resetTxFilters() {
-  state.txFilters = { from: "", to: "", channels: [], types: [] };
+  state.txFilters = { from: "", to: "", channels: [], types: [], tags: [] };
   state.txPage = 1;
   await loadTxs();
 }
