@@ -6,6 +6,7 @@ import {
   toggleTxFilterItem,
   resetTxFilters,
   setTxFilters,
+  setTxInvert,
   setTxPage,
   setTxPageSize,
 } from "../store";
@@ -33,6 +34,7 @@ const hasFilter = computed(() => !!(
   state.txFilters.from || state.txFilters.to
   || state.txFilters.channels.length || state.txFilters.types.length
   || state.txFilters.tags.length
+  || state.txFilters.invert.channels || state.txFilters.invert.types || state.txFilters.invert.tags
 ));
 const totalPages = computed(() => Math.max(1, Math.ceil(state.txTotal / state.txPageSize)));
 
@@ -145,6 +147,10 @@ async function saveEdit(t) {
                   @click="toggleTxFilterItem('channels', a.id)">{{ a.name }}</button>
         </template>
         <span v-else class="muted">（还没有账户）</span>
+        <label class="tx-invert" title="勾选=排除所选渠道；不勾=只显示所选渠道">
+          <input type="checkbox" :checked="state.txFilters.invert.channels"
+                 @change="setTxInvert('channels', $event.target.checked)"> 反选
+        </label>
       </div>
       <div class="tx-filter-row">
         <span class="tx-filter-label">类型</span>
@@ -152,6 +158,10 @@ async function saveEdit(t) {
                 :class="{ on: state.txFilters.types.includes(opt.value) }"
                 @click="toggleTxFilterItem('types', opt.value)">{{ opt.label }}</button>
         <span class="muted">可多选；不选=不限</span>
+        <label class="tx-invert" title="勾选=排除所选类型；不勾=只显示所选类型">
+          <input type="checkbox" :checked="state.txFilters.invert.types"
+                 @change="setTxInvert('types', $event.target.checked)"> 反选
+        </label>
       </div>
       <div class="tx-filter-row" v-if="state.txTags.length">
         <span class="tx-filter-label">标签</span>
@@ -159,6 +169,10 @@ async function saveEdit(t) {
                 :class="{ on: state.txFilters.tags.includes(tg) }"
                 @click="toggleTxFilterItem('tags', tg)">{{ tg }}</button>
         <span class="muted">可多选；不选=不限</span>
+        <label class="tx-invert" title="勾选=排除所选标签；不勾=只显示所选标签">
+          <input type="checkbox" :checked="state.txFilters.invert.tags"
+                 @change="setTxInvert('tags', $event.target.checked)"> 反选
+        </label>
       </div>
     </div>
 

@@ -455,6 +455,11 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tx-filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .tx-filter-row input[type="date"] { width: auto; padding: 4px 8px; }
 .tx-filter-label { color: var(--muted); min-width: 32px; }
+.tx-invert {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap;
+}
+.tx-invert input { width: auto; margin: 0; }
 button.chip {
   border: 1px solid var(--border); background: #fff; color: var(--text);
   border-radius: 999px; padding: 2px 12px; font-size: 13px; cursor: pointer; margin: 0;

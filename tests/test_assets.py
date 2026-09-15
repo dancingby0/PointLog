@@ -368,6 +368,33 @@ class AssetsApiTest(ApiTestCase):
         self.assertEqual(body["total"], 1)
         self.assertEqual(body["transactions"][0]["note"], "前日支付宝支出")
 
+    def test_transactions_filter_invert(self):
+        """反选：勾上=排除所选项（渠道/类型/标签各自可取反）。"""
+        from urllib.parse import quote
+        a, b = self._seed_for_filter()
+        # 渠道反选：排除微信 → 支付宝支出（+ 无渠道? 转账含微信→排除）
+        body = self._get_txs(f"?channels={a['id']}&invert=channels")
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["transactions"][0]["note"], "前日支付宝支出")
+        # 类型反选：排除支出 → 收入 + 转账
+        body = self._get_txs("?types=expense&invert=types")
+        self.assertEqual(body["total"], 2)
+        self.assertEqual({t["type"] for t in body["transactions"]}, {"income", "transfer"})
+        # 标签反选：排除餐饮 → 工资(收入) + 无标签(转账)
+        body = self._get_txs(f"?tags={quote('餐饮')}&invert=tags")
+        self.assertEqual(body["total"], 2)
+        self.assertEqual({t["note"] for t in body["transactions"]}, {"当天微信收入", "前日转账"})
+        # 正反混合：类型反选（排除转账） + 渠道正选（微信）
+        body = self._get_txs(f"?types=transfer&invert=types&channels={a['id']}")
+        self.assertEqual(body["total"], 2)
+        self.assertEqual({t["type"] for t in body["transactions"]}, {"expense", "income"})
+        # 反选但未选任何项 = 不筛选
+        body = self._get_txs("?invert=channels,types,tags")
+        self.assertEqual(body["total"], 4)
+        # 反选与日期区间组合
+        body = self._get_txs(f"?from=2026-09-15&to=2026-09-15&channels={a['id']}&invert=channels")
+        self.assertEqual(body["total"], 0)
+
     def test_transactions_pagination(self):
         """分页：page/page_size 切页；total 为筛选后总数。"""
         self._seed_for_filter()

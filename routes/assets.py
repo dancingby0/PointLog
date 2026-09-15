@@ -202,6 +202,7 @@ def list_transactions():
       channels      渠道多选：账户 id，逗号分隔（转账任一端匹配即算）
       types         类型多选：expense/income/transfer/adjust，逗号分隔
       tags          标签多选：命中任一标签即算（逗号分隔）
+      invert        反选维度：channels/types/tags 中以逗号列出者取反（排除所选项）
       from / to     发生日期区间 YYYY-MM-DD（含端点，按本地日期）
       page/page_size 页码（缺省则不分页、返回全部）
     返回 {transactions, total, page, page_size, available_tags}
@@ -211,6 +212,10 @@ def list_transactions():
     channels = _csv_ids(request.args.get("channels"))
     types = _csv_ids(request.args.get("types"))
     tags = _csv_ids(request.args.get("tags"))
+    invert = set(_csv_ids(request.args.get("invert")))
+    not_channels = "channels" in invert
+    not_types = "types" in invert
+    not_tags = "tags" in invert
     date_from = (request.args.get("from") or "").strip()
     date_to = (request.args.get("to") or "").strip()
 
@@ -233,12 +238,18 @@ def list_transactions():
         if channels:
             involved = {t.get("account_id"), t.get("from_account"), t.get("to_account")}
             involved.discard(None)
-            if not (involved & set(channels)):
+            hit = bool(involved & set(channels))
+            # 正选：保留命中；反选：保留未命中
+            if hit == not_channels:
                 continue
-        if types and t.get("type") not in types:
-            continue
-        if tags and not (set(t.get("tags") or []) & set(tags)):
-            continue
+        if types:
+            hit = t.get("type") in types
+            if hit == not_types:
+                continue
+        if tags:
+            hit = bool(set(t.get("tags") or []) & set(tags))
+            if hit == not_tags:
+                continue
         if d_from or d_to:
             try:
                 day = parse_ts(t.get("ts")).astimezone().date()

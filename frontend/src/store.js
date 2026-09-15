@@ -18,7 +18,10 @@ export const state = reactive({
   accounts: [],           // 账户列表
   totalAssets: 0,         // 个人总资产
   txs: [],                // 流水列表（当前筛选+分页结果）
-  txFilters: { from: "", to: "", channels: [], types: [], tags: [] },  // 流水筛选（全空=不筛选）
+  txFilters: {
+    from: "", to: "", channels: [], types: [], tags: [],
+    invert: { channels: false, types: false, tags: false },   // 各维度是否反选（排除所选项）
+  },
   txTags: [],             // 可筛选标签（流水实际出现过的）
   txPage: 1,              // 流水当前页
   txPageSize: 20,         // 流水每页条数
@@ -811,6 +814,8 @@ export async function loadTxs() {
     if (f.channels.length) p.set("channels", f.channels.join(","));
     if (f.types.length) p.set("types", f.types.join(","));
     if (f.tags.length) p.set("tags", f.tags.join(","));
+    const inverted = Object.keys(f.invert).filter((k) => f.invert[k]);
+    if (inverted.length) p.set("invert", inverted.join(","));
     p.set("page", String(state.txPage));
     p.set("page_size", String(state.txPageSize));
     const res = await fetch(`/api/transactions?${p.toString()}`);
@@ -843,7 +848,16 @@ export async function toggleTxFilterItem(key, value) {
 }
 
 export async function resetTxFilters() {
-  state.txFilters = { from: "", to: "", channels: [], types: [], tags: [] };
+  state.txFilters = {
+    from: "", to: "", channels: [], types: [], tags: [],
+    invert: { channels: false, types: false, tags: false },
+  };
+  state.txPage = 1;
+  await loadTxs();
+}
+
+export async function setTxInvert(key, value) {
+  state.txFilters.invert[key] = value;
   state.txPage = 1;
   await loadTxs();
 }
