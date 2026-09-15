@@ -21,11 +21,14 @@ export const state = reactive({
   txFilters: {
     from: "", to: "", channels: [], types: [], tags: [],
     invert: { channels: false, types: false, tags: false },   // 各维度是否反选（排除所选项）
+    unsettledOnly: false,                                     // 仅看未平账日期的流水
   },
   txTags: [],             // 可筛选标签（流水实际出现过的）
   txPage: 1,              // 流水当前页
   txPageSize: 20,         // 流水每页条数
   txTotal: 0,             // 流水筛选后总条数
+  settledDays: [],        // 已平账日期（本地 YYYY-MM-DD）
+  unsettledDays: [],      // 有流水但尚未平账的日期
   statsSummary: null,     // 统计：坚持与概况
   statsRange: "month",    // 统计时间范围
   statsTrend: [],         // 统计：月度趋势
@@ -816,6 +819,7 @@ export async function loadTxs() {
     if (f.tags.length) p.set("tags", f.tags.join(","));
     const inverted = Object.keys(f.invert).filter((k) => f.invert[k]);
     if (inverted.length) p.set("invert", inverted.join(","));
+    if (f.unsettledOnly) p.set("unsettled", "1");
     p.set("page", String(state.txPage));
     p.set("page_size", String(state.txPageSize));
     const res = await fetch(`/api/transactions?${p.toString()}`);
@@ -851,7 +855,14 @@ export async function resetTxFilters() {
   state.txFilters = {
     from: "", to: "", channels: [], types: [], tags: [],
     invert: { channels: false, types: false, tags: false },
+    unsettledOnly: false,
   };
+  state.txPage = 1;
+  await loadTxs();
+}
+
+export async function setTxUnsettledOnly(value) {
+  state.txFilters.unsettledOnly = value;
   state.txPage = 1;
   await loadTxs();
 }
@@ -886,7 +897,38 @@ export async function loadAssetTags() {
 }
 
 export async function refreshAssets() {
-  await Promise.all([loadAccounts(), loadTxs(), loadAssetTags()]);
+  await Promise.all([loadAccounts(), loadTxs(), loadAssetTags(), loadSettlements()]);
+}
+
+// ---- 平账标记（按天） ----
+export async function loadSettlements() {
+  try {
+    const res = await fetch("/api/asset-settlements");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载平账标记失败");
+    state.settledDays = data.settled_days || [];
+    state.unsettledDays = data.unsettled_days || [];
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+export async function setDaySettled(day, settled) {
+  try {
+    const res = await fetch("/api/asset-settlements", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ day, settled }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    await loadSettlements();
+    await loadTxs();   // 若正筛"仅未平账"，列表需同步刷新
+    return true;
+  } catch (err) {
+    alert("保存失败：" + err.message);
+    return false;
+  }
 }
 
 

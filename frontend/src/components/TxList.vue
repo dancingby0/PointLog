@@ -9,6 +9,7 @@ import {
   setTxInvert,
   setTxPage,
   setTxPageSize,
+  setTxUnsettledOnly,
 } from "../store";
 import { formatTime, toLocalInput } from "../utils";
 import TagMultiSelect from "./TagMultiSelect.vue";
@@ -36,6 +37,7 @@ const hasFilter = computed(() => !!(
   || state.txFilters.channels.length || state.txFilters.types.length
   || state.txFilters.tags.length
   || state.txFilters.invert.channels || state.txFilters.invert.types || state.txFilters.invert.tags
+  || state.txFilters.unsettledOnly
 ));
 const totalPages = computed(() => Math.max(1, Math.ceil(state.txTotal / state.txPageSize)));
 
@@ -130,13 +132,17 @@ async function saveEdit(t) {
       <span class="muted">共 {{ state.txTotal }} 条</span>
     </div>
 
-    <!-- 筛选栏：默认全部不筛选；日期/渠道/类型可同时多选组合 -->
+    <!-- 筛选栏：默认全部不筛选；日期/渠道/类型/标签（各可反选）与"仅未平账"可组合 -->
     <div class="tx-filters">
       <div class="tx-filter-row">
         <span class="tx-filter-label">日期</span>
         <input type="date" v-model="state.txFilters.from" @change="applyDates">
         <span class="muted">至</span>
         <input type="date" v-model="state.txFilters.to" @change="applyDates">
+        <label class="tx-invert-inline" title="只显示发生日期尚未打上'已平账'标记的流水">
+          <input type="checkbox" :checked="state.txFilters.unsettledOnly"
+                 @change="setTxUnsettledOnly($event.target.checked)"> 仅看未平账日期
+        </label>
         <button v-if="hasFilter" type="button" class="ghost tiny" @click="resetTxFilters">清空筛选</button>
         <span v-else class="muted">（默认不筛选）</span>
       </div>

@@ -3,6 +3,7 @@ import { onMounted } from "vue";
 import AccountCard from "../components/AccountCard.vue";
 import TxForm from "../components/TxForm.vue";
 import TxList from "../components/TxList.vue";
+import AssetSettleCard from "../components/AssetSettleCard.vue";
 import { refreshAssets } from "../store";
 
 onMounted(() => refreshAssets());
@@ -14,5 +15,6 @@ onMounted(() => refreshAssets());
     <AccountCard />
     <TxForm />
     <TxList />
+    <AssetSettleCard />
   </div>
 </template>

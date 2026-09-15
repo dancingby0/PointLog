@@ -178,9 +178,10 @@ def global_path() -> Path:
 def default_global() -> dict:
     """个人级数据结构。"""
     return {
-        "asset_tags": [],   # 资产标签池（个人级）：收支/平台等快捷词
-        "accounts": [],     # 账户（v2.1 启用）：[{id, name, balance, kind}]
-        "txs": [],          # 收支/转账流水（v2.1 启用）
+        "asset_tags": [],     # 资产标签池（个人级）：收支/平台等快捷词
+        "accounts": [],       # 账户（v2.1 启用）：[{id, name, balance, kind}]
+        "txs": [],            # 收支/转账流水（v2.1 启用）
+        "settled_days": [],   # 已平账日期（本地 YYYY-MM-DD 列表，按天打标）
     }
 
 

@@ -203,6 +203,7 @@ def list_transactions():
       types         类型多选：expense/income/transfer/adjust，逗号分隔
       tags          标签多选：命中任一标签即算（逗号分隔）
       invert        反选维度：channels/types/tags 中以逗号列出者取反（排除所选项）
+      unsettled     1=仅返回"发生日期尚未平账"的流水
       from / to     发生日期区间 YYYY-MM-DD（含端点，按本地日期）
       page/page_size 页码（缺省则不分页、返回全部）
     返回 {transactions, total, page, page_size, available_tags}
@@ -216,6 +217,8 @@ def list_transactions():
     not_channels = "channels" in invert
     not_types = "types" in invert
     not_tags = "tags" in invert
+    unsettled_only = (request.args.get("unsettled") or "").strip() not in ("", "0", "false", "no")
+    settled_days = set(g.get("settled_days") or [])
     date_from = (request.args.get("from") or "").strip()
     date_to = (request.args.get("to") or "").strip()
 
@@ -250,7 +253,7 @@ def list_transactions():
             hit = bool(set(t.get("tags") or []) & set(tags))
             if hit == not_tags:
                 continue
-        if d_from or d_to:
+        if d_from or d_to or unsettled_only:
             try:
                 day = parse_ts(t.get("ts")).astimezone().date()
             except (ValueError, TypeError):
@@ -258,6 +261,8 @@ def list_transactions():
             if d_from and day < d_from:
                 continue
             if d_to and day > d_to:
+                continue
+            if unsettled_only and day.isoformat() in settled_days:
                 continue
         rows.append(_serialize_tx(t))
 
@@ -303,6 +308,46 @@ def _serialize_tx(t: dict) -> dict:
         "tags": t.get("tags", []),
         "ts": t.get("ts"),
     }
+
+
+@bp.get("/asset-settlements")
+def list_settlements():
+    """平账标记：已平账日期 + 有流水但尚未平账的日期（均按本地日期）。"""
+    g = data.load_global()
+    settled = sorted(set(g.get("settled_days") or []))
+    settled_set = set(settled)
+    tx_days = set()
+    for t in g["txs"]:
+        try:
+            tx_days.add(parse_ts(t.get("ts")).astimezone().date().isoformat())
+        except (ValueError, TypeError):
+            continue
+    unsettled = sorted(d for d in tx_days if d not in settled_set)
+    return jsonify({"settled_days": settled, "unsettled_days": unsettled})
+
+
+@bp.put("/asset-settlements")
+def set_settlement():
+    """标记/取消某天已平账。body {day: 'YYYY-MM-DD', settled: true/false}。"""
+    body = request.get_json(silent=True) or {}
+    day = str(body.get("day") or "").strip()
+    if not day:
+        return jsonify({"error": "日期不能为空"}), 400
+    try:
+        dt.date.fromisoformat(day)
+    except ValueError:
+        return jsonify({"error": "日期格式应为 YYYY-MM-DD"}), 400
+
+    settled_flag = bool(body.get("settled", True))
+    g = data.load_global()
+    days = set(g.get("settled_days") or [])
+    if settled_flag:
+        days.add(day)
+    else:
+        days.discard(day)
+    g["settled_days"] = sorted(days)
+    data.save_global(g)
+    return jsonify({"day": day, "settled": settled_flag, "settled_days": g["settled_days"]})
 
 
 @bp.post("/transactions")

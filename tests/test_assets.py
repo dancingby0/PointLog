@@ -368,6 +368,54 @@ class AssetsApiTest(ApiTestCase):
         self.assertEqual(body["total"], 1)
         self.assertEqual(body["transactions"][0]["note"], "前日支付宝支出")
 
+    def test_settlements_mark_and_list(self):
+        """平账标记：未平账列表 = 有流水的日期 − 已平账日期。"""
+        a = self._mk_acct("微信", "asset", 1000)
+        self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": a["id"], "amount": 10, "ts": "2026-09-15T10:00"})
+        self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": a["id"], "amount": 20, "ts": "2026-09-14T09:00"})
+        body = self.client.get("/api/asset-settlements").get_json()
+        self.assertEqual(body["settled_days"], [])
+        self.assertEqual(body["unsettled_days"], ["2026-09-14", "2026-09-15"])
+        # 标记 9/15 已平账
+        r = self.client.put("/api/asset-settlements", json={"day": "2026-09-15", "settled": True})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["settled_days"], ["2026-09-15"])
+        body = self.client.get("/api/asset-settlements").get_json()
+        self.assertEqual(body["settled_days"], ["2026-09-15"])
+        self.assertEqual(body["unsettled_days"], ["2026-09-14"])
+        # 取消标记
+        r = self.client.put("/api/asset-settlements", json={"day": "2026-09-15", "settled": False})
+        self.assertEqual(r.get_json()["settled_days"], [])
+        self.assertEqual(
+            self.client.get("/api/asset-settlements").get_json()["unsettled_days"],
+            ["2026-09-14", "2026-09-15"])
+
+    def test_settlements_validation(self):
+        self.assertEqual(
+            self.client.put("/api/asset-settlements", json={"day": ""}).status_code, 400)
+        self.assertEqual(
+            self.client.put("/api/asset-settlements", json={"day": "2026/09/15"}).status_code, 400)
+
+    def test_transactions_filter_unsettled(self):
+        """仅看未平账日期：已平账日期的流水被排除；可与其它筛选叠加。"""
+        self._seed_for_filter()   # 09-15 两笔、09-14 两笔
+        self.assertEqual(self._get_txs("?unsettled=1")["total"], 4)
+        self.client.put("/api/asset-settlements", json={"day": "2026-09-15", "settled": True})
+        body = self._get_txs("?unsettled=1")
+        self.assertEqual(body["total"], 2)
+        self.assertTrue(all(t["note"].startswith("前日") for t in body["transactions"]))
+        # 叠加类型筛选
+        body = self._get_txs("?unsettled=1&types=expense")
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["transactions"][0]["note"], "前日支付宝支出")
+        # 全部平账后为空
+        self.client.put("/api/asset-settlements", json={"day": "2026-09-14", "settled": True})
+        self.assertEqual(self._get_txs("?unsettled=1")["total"], 0)
+        # 不传参数则不受影响
+        self.assertEqual(self._get_txs()["total"], 4)
+
     def test_transaction_multi_tags(self):
         """记一笔可带多个标签；都能用于筛选。"""
         from urllib.parse import quote
