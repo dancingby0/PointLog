@@ -11,6 +11,7 @@ import {
   setTxPageSize,
 } from "../store";
 import { formatTime, toLocalInput } from "../utils";
+import TagMultiSelect from "./TagMultiSelect.vue";
 
 const typeLabel = { expense: "支出", income: "收入", transfer: "转账", adjust: "校准" };
 const TYPE_OPTS = [
@@ -47,7 +48,7 @@ function applyDates() {
 const editingId = ref(null);
 const edit = reactive({
   type: "expense", account_id: "", from: "", to: "",
-  amount: "", ts: "", note: "", tagsText: "",
+  amount: "", ts: "", note: "", tags: [],
 });
 
 // 行内删除（两步确认防误触；校准记录不可删除）
@@ -81,7 +82,7 @@ function startEdit(t) {
   edit.amount = String(t.amount);
   edit.ts = toLocalInput(new Date(t.ts));
   edit.note = t.note || "";
-  edit.tagsText = (t.tags || []).join(", ");
+  edit.tags = [...(t.tags || [])];
 }
 
 function cancelEdit() {
@@ -96,7 +97,7 @@ async function saveEdit(t) {
     amount,
     ts: edit.ts,
     note: edit.note,
-    tags: edit.tagsText.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+    tags: [...edit.tags],
   };
   if (edit.type === "transfer") {
     if (!edit.from || !edit.to || edit.from === edit.to) { alert("请选择两个不同账户"); return; }
@@ -241,8 +242,8 @@ async function saveEdit(t) {
           <label>备注
             <input v-model="edit.note" type="text" maxlength="100" placeholder="备注（可留空）">
           </label>
-          <label>标签
-            <input v-model="edit.tagsText" type="text" maxlength="100" placeholder="多个标签用逗号分隔">
+          <label class="tx-edit-tags">标签
+            <TagMultiSelect :tags="state.assetTags" v-model="edit.tags" />
           </label>
           <button type="button" @click="saveEdit(t)">保存</button>
           <button type="button" class="ghost" @click="cancelEdit">取消</button>

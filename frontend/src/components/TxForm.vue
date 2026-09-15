@@ -3,7 +3,7 @@
 import { reactive, ref } from "vue";
 import { state, refreshAssets, loadAccounts } from "../store";
 import { toLocalInput } from "../utils";
-import TagSelect from "./TagSelect.vue";
+import TagMultiSelect from "./TagMultiSelect.vue";
 
 const form = reactive({
   type: "expense",
@@ -11,7 +11,7 @@ const form = reactive({
   from: "",
   to: "",
   amount: "",
-  tag: "",
+  tags: [],                       // 标签（可多选）
   note: "",
   ts: toLocalInput(new Date()),   // 发生时间（默认现在，可改为历史时间）
 });
@@ -28,9 +28,9 @@ async function submit() {
     type: form.type,
     amount,
     note: form.note.trim(),
+    tags: [...form.tags],
     ts: form.ts || undefined,
   };
-  if (form.tag.trim()) payload.tags = [form.tag.trim()];
 
   if (form.type === "transfer") {
     if (!form.from || !form.to || form.from === form.to) { alert("请选择两个不同账户"); return; }
@@ -50,7 +50,7 @@ async function submit() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "保存失败");
-    form.amount = ""; form.note = ""; form.tag = "";
+    form.amount = ""; form.note = ""; form.tags = [];
     form.ts = toLocalInput(new Date());
     await refreshAssets();
     await loadAccounts();
@@ -115,8 +115,8 @@ async function onAddAssetTag(tag) {
     <label class="label-block">发生时间（可按实际时刻补录）
       <input v-model="form.ts" type="datetime-local">
     </label>
-    <label class="label-block">标签（可选）
-      <TagSelect :tags="state.assetTags" v-model="form.tag" @add-tag="onAddAssetTag" />
+    <label class="label-block">标签（可多选）
+      <TagMultiSelect :tags="state.assetTags" v-model="form.tags" @add-tag="onAddAssetTag" />
     </label>
     <label class="label-block">备注
       <input v-model="form.note" type="text" maxlength="100" placeholder="这笔钱花在哪 / 备注">

@@ -368,6 +368,26 @@ class AssetsApiTest(ApiTestCase):
         self.assertEqual(body["total"], 1)
         self.assertEqual(body["transactions"][0]["note"], "前日支付宝支出")
 
+    def test_transaction_multi_tags(self):
+        """记一笔可带多个标签；都能用于筛选。"""
+        from urllib.parse import quote
+        acc = self._mk_acct("微信", "asset", 100)
+        r = self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": acc["id"], "amount": 18,
+            "tags": ["餐饮", "外卖"], "note": "晚饭外卖"})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        self.assertEqual(r.get_json()["tags"], ["餐饮", "外卖"])
+        body = self._get_txs()
+        self.assertEqual(set(body["available_tags"]), {"餐饮", "外卖"})
+        self.assertEqual(self._get_txs(f"?tags={quote('外卖')}")["total"], 1)
+        self.assertEqual(self._get_txs(f"?tags={quote('餐饮')}")["total"], 1)
+        # 编辑为另一个标签集合
+        tx_id = r.get_json()["id"]
+        r = self.client.put(f"/api/transactions/{tx_id}", json={"tags": ["打车"]})
+        self.assertEqual(r.get_json()["tags"], ["打车"])
+        self.assertEqual(self._get_txs(f"?tags={quote('打车')}")["total"], 1)
+        self.assertEqual(self._get_txs(f"?tags={quote('餐饮')}")["total"], 0)
+
     def test_transactions_filter_invert(self):
         """反选：勾上=排除所选项（渠道/类型/标签各自可取反）。"""
         from urllib.parse import quote
