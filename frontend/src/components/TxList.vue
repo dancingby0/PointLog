@@ -41,9 +41,12 @@ function applyDates() {
   setTxFilters({ from: state.txFilters.from, to: state.txFilters.to });
 }
 
-// 行内编辑（只改发生时间 / 备注；校准记录不可编辑）
+// 行内编辑（类型/金额/账户/时间/备注/标签；保存=撤销原记录影响并按新内容重新入账）
 const editingId = ref(null);
-const edit = reactive({ ts: "", note: "" });
+const edit = reactive({
+  type: "expense", account_id: "", from: "", to: "",
+  amount: "", ts: "", note: "", tagsText: "",
+});
 
 // 行内删除（两步确认防误触；校准记录不可删除）
 const confirmDeleteId = ref(null);
@@ -69,8 +72,14 @@ async function deleteTx(t) {
 function startEdit(t) {
   editingId.value = t.id;
   confirmDeleteId.value = null;
+  edit.type = t.type;
+  edit.account_id = t.account_id || "";
+  edit.from = t.from_account || "";
+  edit.to = t.to_account || "";
+  edit.amount = String(t.amount);
   edit.ts = toLocalInput(new Date(t.ts));
   edit.note = t.note || "";
+  edit.tagsText = (t.tags || []).join(", ");
 }
 
 function cancelEdit() {
@@ -78,11 +87,28 @@ function cancelEdit() {
 }
 
 async function saveEdit(t) {
+  const amount = Number(edit.amount);
+  if (!amount || amount <= 0) { alert("金额需大于 0"); return; }
+  const payload = {
+    type: edit.type,
+    amount,
+    ts: edit.ts,
+    note: edit.note,
+    tags: edit.tagsText.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+  };
+  if (edit.type === "transfer") {
+    if (!edit.from || !edit.to || edit.from === edit.to) { alert("请选择两个不同账户"); return; }
+    payload.from = edit.from;
+    payload.to = edit.to;
+  } else {
+    if (!edit.account_id) { alert("请选择账户"); return; }
+    payload.account_id = edit.account_id;
+  }
   try {
     const res = await fetch(`/api/transactions/${encodeURIComponent(t.id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ts: edit.ts, note: edit.note }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "保存失败");
@@ -165,15 +191,48 @@ async function saveEdit(t) {
           </div>
         </div>
         <div v-if="editingId === t.id" class="tx-edit">
+          <label>类型
+            <select v-model="edit.type">
+              <option value="expense">支出</option>
+              <option value="income">收入</option>
+              <option value="transfer">转账</option>
+            </select>
+          </label>
+          <template v-if="edit.type === 'transfer'">
+            <label>从
+              <select v-model="edit.from">
+                <option value="" disabled>选择账户…</option>
+                <option v-for="a in state.accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+              </select>
+            </label>
+            <label>到
+              <select v-model="edit.to">
+                <option value="" disabled>选择账户…</option>
+                <option v-for="a in state.accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+              </select>
+            </label>
+          </template>
+          <label v-else>账户
+            <select v-model="edit.account_id">
+              <option value="" disabled>选择账户…</option>
+              <option v-for="a in state.accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+            </select>
+          </label>
+          <label>金额
+            <input v-model="edit.amount" type="number" min="0" step="0.01">
+          </label>
           <label>发生时间
             <input v-model="edit.ts" type="datetime-local">
           </label>
           <label>备注
             <input v-model="edit.note" type="text" maxlength="100" placeholder="备注（可留空）">
           </label>
+          <label>标签
+            <input v-model="edit.tagsText" type="text" maxlength="100" placeholder="多个标签用逗号分隔">
+          </label>
           <button type="button" @click="saveEdit(t)">保存</button>
           <button type="button" class="ghost" @click="cancelEdit">取消</button>
-          <span class="tx-edit-hint">金额 / 账户 / 类型如需调整，请删除后重记（或用"校准"修正余额）</span>
+          <span class="tx-edit-hint">保存 = 撤销原记录对余额的影响，再按新内容重新入账（余额自动重算）</span>
         </div>
         <div v-if="confirmDeleteId === t.id" class="tx-edit">
           <span class="tx-del-warn">⚠️ 将永久删除这笔 {{ typeLabel[t.type] }}（¥{{ Number(t.amount).toFixed(2) }}），并<b>回滚账户余额</b>，不可恢复！</span>

@@ -439,6 +439,8 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 .tx-edit label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
 .tx-edit input[type="datetime-local"] { width: auto; padding: 4px 8px; }
+.tx-edit select { width: auto; padding: 4px 8px; }
+.tx-edit input[type="number"] { width: 110px; }
 .tx-edit input[type="text"] { flex: 1; min-width: 160px; }
 .tx-edit-hint { width: 100%; font-size: 12px; color: var(--muted); }
 

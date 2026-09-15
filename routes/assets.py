@@ -32,6 +32,33 @@ def _require_account(g: dict, account_id: str) -> dict:
     return acc
 
 
+def _find_account(g: dict, account_id):
+    return next((a for a in g["accounts"] if a["id"] == account_id), None)
+
+
+def _apply_tx_effect(g: dict, tx_type: str, amount_fen: int, ref: dict, sign: int = 1) -> None:
+    """应用（sign=1）或撤销（sign=-1）一笔流水对账户余额的影响。
+
+    ref 提供账户引用键：account_id / from_account / to_account。
+    账户不存在时跳过（如账户已删除）。
+    """
+    if tx_type == "expense":
+        acc = _find_account(g, ref.get("account_id"))
+        if acc is not None:
+            acc["balance_fen"] -= sign * amount_fen
+    elif tx_type == "income":
+        acc = _find_account(g, ref.get("account_id"))
+        if acc is not None:
+            acc["balance_fen"] += sign * amount_fen
+    elif tx_type == "transfer":
+        fa = _find_account(g, ref.get("from_account"))
+        ta = _find_account(g, ref.get("to_account"))
+        if fa is not None:
+            fa["balance_fen"] -= sign * amount_fen
+        if ta is not None:
+            ta["balance_fen"] += sign * amount_fen
+
+
 def _acct_id() -> str:
     return data.new_id()
 
@@ -339,10 +366,11 @@ def create_transaction():
 
 @bp.put("/transactions/<tx_id>")
 def update_transaction(tx_id: str):
-    """编辑流水：允许修改发生时间 / 备注 / 标签。
+    """编辑流水：类型 / 金额 / 账户 / 标签 / 发生时间 / 备注 均可改。
 
-    金额、账户、类型不可直接改（改动会牵动余额历史口径）；
-    如需调整请删除后重记，或用"校准"直接修正余额。
+    实现上等价于"删除原记录 + 重新入账"：先撤销旧记录对余额的影响，
+    再按新参数应用影响，做到余额与流水一致；保留原 id（列表不跳变）。
+    校准记录不可编辑。
     """
     g = data.load_global()
     tx = next((t for t in g["txs"] if t.get("id") == tx_id), None)
@@ -352,31 +380,89 @@ def update_transaction(tx_id: str):
         return jsonify({"error": "校准记录不可编辑"}), 400
 
     body = request.get_json(silent=True) or {}
-    changed = False
+    old = {
+        "type": tx.get("type"),
+        "amount_fen": int(tx.get("amount_fen", 0)),
+        "account_id": tx.get("account_id"),
+        "from_account": tx.get("from_account"),
+        "to_account": tx.get("to_account"),
+    }
+
+    # 目标类型
+    new_type = str(body.get("type") or old["type"])
+    if new_type not in ("expense", "income", "transfer"):
+        return jsonify({"error": "type 应为 expense/income/transfer"}), 400
+
+    # 目标金额（未提供则沿用旧值）
+    if "amount" in body:
+        try:
+            new_amount_fen = _yuan_to_fen(body.get("amount"))
+        except ValueError:
+            return jsonify({"error": "金额格式不正确"}), 400
+    else:
+        new_amount_fen = old["amount_fen"]
+    if new_amount_fen <= 0:
+        return jsonify({"error": "金额必须大于 0"}), 400
+
+    # 目标账户（按新类型校验）
+    new_ref = {"type": new_type, "amount_fen": new_amount_fen}
+    if new_type == "transfer":
+        from_id = str(body.get("from") or old["from_account"] or "")
+        to_id = str(body.get("to") or old["to_account"] or "")
+        if not from_id or not to_id or from_id == to_id:
+            return jsonify({"error": "转账需选择两个不同账户"}), 400
+        if _find_account(g, from_id) is None or _find_account(g, to_id) is None:
+            return jsonify({"error": "账户不存在"}), 404
+        new_ref["from_account"] = from_id
+        new_ref["to_account"] = to_id
+    else:
+        account_id = str(body.get("account_id") or old["account_id"] or "")
+        if not account_id:
+            return jsonify({"error": "请选择账户"}), 400
+        if _find_account(g, account_id) is None:
+            return jsonify({"error": "账户不存在"}), 404
+        new_ref["account_id"] = account_id
+
+    # 目标时间（未提供则沿用旧值）
     if "ts" in body:
         raw = body.get("ts")
         if not raw:
             return jsonify({"error": "时间不能为空"}), 400
         try:
             # 与新增一致：naive 视为本地，统一存本地秒级 ISO
-            ts_iso = parse_ts(raw).isoformat(timespec="seconds")
+            new_ts = parse_ts(raw).isoformat(timespec="seconds")
         except (ValueError, TypeError):
             return jsonify({"error": "时间格式不正确"}), 400
-        tx["ts"] = ts_iso
-        changed = True
+    else:
+        new_ts = tx.get("ts")
+
+    # 撤销旧影响 → 应用新影响
+    _apply_tx_effect(g, old["type"], old["amount_fen"], old, sign=-1)
+    _apply_tx_effect(g, new_type, new_amount_fen, new_ref, sign=1)
+
+    # 写回流水字段（清理不再适用的账户键）
+    tx["type"] = new_type
+    tx["amount_fen"] = new_amount_fen
+    tx["ts"] = new_ts
+    for key in ("account_id", "from_account", "to_account"):
+        tx.pop(key, None)
+    if new_type == "transfer":
+        tx["from_account"] = new_ref["from_account"]
+        tx["to_account"] = new_ref["to_account"]
+    else:
+        tx["account_id"] = new_ref["account_id"]
     if "note" in body:
         tx["note"] = str(body.get("note") or "").strip()
-        changed = True
     if "tags" in body:
         tags = body.get("tags") or []
         if not isinstance(tags, list):
             tags = [tags]
         tx["tags"] = [str(x).strip() for x in tags if str(x).strip()]
-        changed = True
-    if not changed:
-        return jsonify(_serialize_tx(tx))
+
     data.save_global(g)
     return jsonify(_serialize_tx(tx))
+
+
 @bp.delete("/transactions/<tx_id>")
 def delete_transaction(tx_id: str):
     """删除流水：同步回滚该笔对账户余额的影响。
@@ -393,23 +479,7 @@ def delete_transaction(tx_id: str):
     if ttype == "adjust":
         return jsonify({"error": "校准记录不可删除（保留校准痕迹）"}), 400
 
-    amount_fen = int(tx.get("amount_fen", 0))
-    if ttype == "expense":
-        acc = next((a for a in g["accounts"] if a["id"] == tx.get("account_id")), None)
-        if acc is not None:
-            acc["balance_fen"] += amount_fen
-    elif ttype == "income":
-        acc = next((a for a in g["accounts"] if a["id"] == tx.get("account_id")), None)
-        if acc is not None:
-            acc["balance_fen"] -= amount_fen
-    elif ttype == "transfer":
-        fa = next((a for a in g["accounts"] if a["id"] == tx.get("from_account")), None)
-        ta = next((a for a in g["accounts"] if a["id"] == tx.get("to_account")), None)
-        if fa is not None:
-            fa["balance_fen"] += amount_fen
-        if ta is not None:
-            ta["balance_fen"] -= amount_fen
-
+    _apply_tx_effect(g, ttype, int(tx.get("amount_fen", 0)), tx, sign=-1)
     g["txs"] = [t for t in g["txs"] if t.get("id") != tx_id]
     data.save_global(g)
     return jsonify({"ok": True})

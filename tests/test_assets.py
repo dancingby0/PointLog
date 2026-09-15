@@ -13,6 +13,10 @@ class AssetsApiTest(ApiTestCase):
         self.assertEqual(r.status_code, 201, r.get_json())
         return r.get_json()
 
+    def _balance(self, account_id):
+        body = self.client.get("/api/accounts").get_json()
+        return next(a for a in body["accounts"] if a["id"] == account_id)["balance"]
+
     def test_create_and_list(self):
         self._mk_acct("现金", "asset", 100.5)
         self._mk_acct("欠款", "liability", -50)
@@ -141,6 +145,76 @@ class AssetsApiTest(ApiTestCase):
         # 列表返回编辑后内容
         txs = self.client.get("/api/transactions").get_json()["transactions"]
         self.assertTrue(any(t["id"] == tx_id and t["note"] == "改到 5 月 1 日" for t in txs))
+
+    def test_update_transaction_amount_account_type(self):
+        """编辑可改金额 / 账户 / 类型：等价"撤销原记录 + 重新入账"，余额自动重算。"""
+        a = self._mk_acct("A", "asset", 100)
+        b = self._mk_acct("B", "asset", 100)
+        r = self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": a["id"], "amount": 10})
+        tx_id = r.get_json()["id"]
+        self.assertEqual(self._balance(a["id"]), 90)
+        # 改金额 10 → 25
+        r = self.client.put(f"/api/transactions/{tx_id}", json={"amount": 25})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["amount"], 25)
+        self.assertEqual(self._balance(a["id"]), 75)
+        # 改账户 A → B
+        r = self.client.put(f"/api/transactions/{tx_id}", json={"account_id": b["id"]})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(self._balance(a["id"]), 100)
+        self.assertEqual(self._balance(b["id"]), 75)
+        # 改类型 支出 → 收入（余额方向反转）
+        r = self.client.put(f"/api/transactions/{tx_id}", json={"type": "income"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["type"], "income")
+        self.assertEqual(self._balance(b["id"]), 125)
+        self.assertEqual(self._balance(a["id"]), 100)
+
+    def test_update_transfer_to_expense_and_back(self):
+        """转账 ⇄ 支出 互转：两端余额正确还原与重算。"""
+        a = self._mk_acct("A", "asset", 500)
+        b = self._mk_acct("B", "asset", 0)
+        r = self.client.post("/api/transactions", json={
+            "type": "transfer", "from": a["id"], "to": b["id"], "amount": 100})
+        tx_id = r.get_json()["id"]
+        self.assertEqual(self._balance(a["id"]), 400)
+        self.assertEqual(self._balance(b["id"]), 100)
+        # 改成支出（A 花 100）：撤销转账 → 再应用支出
+        r = self.client.put(f"/api/transactions/{tx_id}", json={
+            "type": "expense", "account_id": a["id"], "amount": 100})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        body = r.get_json()
+        self.assertEqual(body["type"], "expense")
+        self.assertIsNone(body["from_account"])
+        self.assertIsNone(body["to_account"])
+        self.assertEqual(self._balance(a["id"]), 400)
+        self.assertEqual(self._balance(b["id"]), 0)
+        # 再改回转账（金额沿用 100）
+        r = self.client.put(f"/api/transactions/{tx_id}", json={
+            "type": "transfer", "from": a["id"], "to": b["id"]})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(self._balance(a["id"]), 400)
+        self.assertEqual(self._balance(b["id"]), 100)
+
+    def test_update_transaction_validation_keeps_balance(self):
+        """非法编辑被拒且不影响余额与记录。"""
+        a = self._mk_acct("A", "asset", 100)
+        r = self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": a["id"], "amount": 10})
+        tx_id = r.get_json()["id"]
+        self.assertEqual(self.client.put(f"/api/transactions/{tx_id}", json={"amount": 0}).status_code, 400)
+        self.assertEqual(self.client.put(f"/api/transactions/{tx_id}", json={"amount": -3}).status_code, 400)
+        self.assertEqual(self.client.put(f"/api/transactions/{tx_id}", json={"type": "bad"}).status_code, 400)
+        self.assertEqual(self.client.put(f"/api/transactions/{tx_id}", json={"account_id": "nope"}).status_code, 404)
+        self.assertEqual(self.client.put(
+            f"/api/transactions/{tx_id}", json={"type": "transfer", "from": a["id"], "to": a["id"]}).status_code, 400)
+        self.assertEqual(self.client.put(f"/api/transactions/{tx_id}", json={"ts": ""}).status_code, 400)
+        # 余额与记录未被破坏
+        self.assertEqual(self._balance(a["id"]), 90)
+        body = self.client.get("/api/transactions").get_json()
+        self.assertEqual(body["transactions"][0]["amount"], 10)
+        self.assertEqual(body["transactions"][0]["type"], "expense")
 
     def test_update_transaction_not_found(self):
         r = self.client.put("/api/transactions/nope", json={"ts": "2026-05-01T08:30"})
