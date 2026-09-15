@@ -127,5 +127,105 @@ class SummaryApiTest(ApiTestCase):
         self.assertEqual(cur["expense"], 23.5)
 
 
+class AssetAnalysisApiTest(ApiTestCase):
+    """资产统计分析：时间序列（收入/支出）+ 标签占比 + 筛选/粒度。"""
+
+    def _seed(self):
+        import data as data_mod
+        g = data_mod.load_global()
+        g["txs"] = [
+            # 2026-08
+            {"id": "1", "type": "income", "amount_fen": 5000, "account_id": "A",
+             "tags": ["工资"], "ts": "2026-08-10T09:00"},
+            {"id": "2", "type": "transfer", "amount_fen": 99900, "from_account": "A",
+             "to_account": "B", "tags": [], "ts": "2026-08-11T09:00"},   # 转账不计
+            # 2026-09
+            {"id": "3", "type": "income", "amount_fen": 10000, "account_id": "A",
+             "tags": ["工资"], "ts": "2026-09-15T09:00"},
+            {"id": "4", "type": "expense", "amount_fen": 3000, "account_id": "A",
+             "tags": ["餐饮"], "ts": "2026-09-15T12:00"},
+            {"id": "5", "type": "expense", "amount_fen": 2000, "account_id": "B",
+             "tags": ["餐饮", "交通"], "ts": "2026-09-16T19:00"},
+            {"id": "6", "type": "expense", "amount_fen": 500, "account_id": "B",
+             "tags": [], "ts": "2026-09-16T20:00"},                      # 无标签
+            {"id": "7", "type": "adjust", "amount_fen": 12300, "account_id": "B",
+             "tags": [], "ts": "2026-09-17T10:00"},                      # 校准不计
+        ]
+        data_mod.save_global(g)
+
+    def _get(self, query):
+        r = self.client.get(f"/api/stats/asset-analysis?{query}")
+        self.assertEqual(r.status_code, 200, r.get_json())
+        return r.get_json()
+
+    def test_series_by_month(self):
+        self._seed()
+        body = self._get("from=2026-08-01&to=2026-09-30&granularity=month")
+        self.assertEqual([s["period"] for s in body["series"]], ["2026-08", "2026-09"])
+        aug, sep = body["series"]
+        self.assertEqual((aug["income"], aug["expense"]), (50.0, 0.0))
+        self.assertEqual((sep["income"], sep["expense"]), (100.0, 55.0))
+        self.assertEqual(body["totals"], {"income": 150.0, "expense": 55.0, "net": 95.0})
+        # 标签占比（多标签均摊：20 元 → 餐饮 10 + 交通 10；无标签→未分类）
+        self.assertEqual(body["tag_income"], [{"tag": "工资", "amount": 150.0}])
+        by_tag = {d["tag"]: d["amount"] for d in body["tag_expense"]}
+        self.assertEqual(by_tag, {"餐饮": 40.0, "未分类": 5.0, "交通": 10.0})
+
+    def test_series_by_day_fills_gaps(self):
+        self._seed()
+        body = self._get("from=2026-09-14&to=2026-09-17&granularity=day")
+        periods = [s["period"] for s in body["series"]]
+        self.assertEqual(periods, ["2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17"])
+        self.assertEqual(body["series"][0], {"period": "2026-09-14", "label": "09-14",
+                                            "income": 0, "expense": 0})
+        self.assertEqual(body["series"][2]["expense"], 25.0)   # 20 + 5
+
+    def test_series_by_year(self):
+        self._seed()
+        body = self._get("from=2026-01-01&to=2026-12-31&granularity=year")
+        self.assertEqual(len(body["series"]), 1)
+        self.assertEqual(body["series"][0]["label"], "2026年")
+        self.assertEqual(body["series"][0]["income"], 150.0)
+
+    def test_filters(self):
+        self._seed()
+        base = "from=2026-08-01&to=2026-09-30&granularity=month"
+        # 账户筛选：只看 B 账户
+        body = self._get(f"{base}&accounts=B")
+        self.assertEqual(body["totals"], {"income": 0.0, "expense": 25.0, "net": -25.0})
+        # 标签筛选：只含"交通"的那笔（整笔计入）
+        body = self._get(f"{base}&tags=交通")
+        self.assertEqual(body["totals"]["expense"], 20.0)
+        self.assertEqual(body["totals"]["income"], 0.0)
+        # flow=expense 只统计支出
+        body = self._get(f"{base}&flow=expense")
+        self.assertEqual(body["totals"]["income"], 0.0)
+        self.assertEqual(body["tag_income"], [])
+        self.assertEqual(body["series"][1]["income"], 0)
+        # flow=income 只统计收入
+        body = self._get(f"{base}&flow=income")
+        self.assertEqual(body["totals"]["expense"], 0.0)
+        self.assertEqual(body["tag_expense"], [])
+
+    def test_validation(self):
+        self.assertEqual(self.client.get("/api/stats/asset-analysis?from=2026/01/01").status_code, 400)
+        self.assertEqual(
+            self.client.get("/api/stats/asset-analysis?from=2026-09-30&to=2026-09-01").status_code, 400)
+        self.assertEqual(
+            self.client.get("/api/stats/asset-analysis?granularity=week").status_code, 400)
+        self.assertEqual(self.client.get("/api/stats/asset-analysis?flow=bad").status_code, 400)
+        # 按日跨多年 → 时间点过多被拒
+        self.assertEqual(
+            self.client.get("/api/stats/asset-analysis?from=2020-01-01&to=2026-12-31&granularity=day").status_code,
+            400)
+
+    def test_default_range_is_ok(self):
+        self._seed()
+        body = self._get("")
+        self.assertEqual(body["granularity"], "month")
+        self.assertEqual(body["flow"], "both")
+        self.assertTrue(1 <= len(body["series"]) <= 13)
+
+
 if __name__ == "__main__":
     unittest.main()

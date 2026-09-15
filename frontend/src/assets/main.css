@@ -481,6 +481,19 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 .settle-tag.on { background: #dcfce7; border-color: #bbf7d0; color: #15803d; }
 .settle-tag .tag-x { line-height: 1; }
+
+/* ---- 资产统计页 ---- */
+.as-summary { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 4px; }
+.as-summary b { color: var(--text); }
+.as-summary b.up { color: #15803d; }
+.as-summary b.down { color: var(--danger); }
+.as-line { height: 320px; }
+.as-pie-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 720px) {
+  .as-pie-grid { grid-template-columns: 1fr; }
+}
+.as-pie h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 6px; }
+.as-pie-chart { height: 280px; }
 button.chip {
   border: 1px solid var(--border); background: #fff; color: var(--text);
   border-radius: 999px; padding: 2px 12px; font-size: 13px; cursor: pointer; margin: 0;

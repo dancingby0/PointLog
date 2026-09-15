@@ -2,7 +2,7 @@
 // ECharts 通用包装组件（按需引入，控制打包体积）：传入 option 即渲染。
 // 用法：<EChart :option="lineOption" style="height:280px" />
 import * as echarts from "echarts/core";
-import { BarChart, LineChart } from "echarts/charts";
+import { BarChart, LineChart, PieChart } from "echarts/charts";
 import {
   GridComponent,
   LegendComponent,
@@ -14,6 +14,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 echarts.use([
   BarChart,
   LineChart,
+  PieChart,
   GridComponent,
   LegendComponent,
   TooltipComponent,

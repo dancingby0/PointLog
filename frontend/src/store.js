@@ -34,6 +34,7 @@ export const state = reactive({
   statsTrend: [],         // 统计：月度趋势
   statsDist: null,        // 统计：分布（标签/星期/时段）
   statsAssets: [],        // 统计：收支月度趋势
+  assetStats: null,       // 资产统计分析（筛选+粒度+折线/饼图）
   editingId: null,        // 正在编辑的记录 id
   form: { content: "", points: 1, category: "", ts: "" },
   noteDraft: "",          // 感想草稿
@@ -975,6 +976,29 @@ export async function loadStatsAssets() {
     state.statsAssets = data;
   } catch (err) {
     console.error(err);
+  }
+}
+
+// ---- 资产统计分析（多筛选 + 粒度 + 折线/饼图） ----
+export async function loadAssetAnalysis(params = {}) {
+  try {
+    const p = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (Array.isArray(v)) {
+        if (v.length) p.set(k, v.join(","));
+      } else if (v !== "" && v !== null && v !== undefined) {
+        p.set(k, String(v));
+      }
+    });
+    const res = await fetch(`/api/stats/asset-analysis?${p.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载资产统计失败");
+    state.assetStats = data;
+    return data;
+  } catch (err) {
+    state.dialogError = err.message;
+    alert("加载资产统计失败：" + err.message);
+    return null;
   }
 }
 

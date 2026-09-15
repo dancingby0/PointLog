@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import DiaryView from "./views/DiaryView.vue";
 import AssetsView from "./views/AssetsView.vue";
+import AssetStatsView from "./views/AssetStatsView.vue";
 import StatsView from "./views/StatsView.vue";
 import SettingsView from "./views/SettingsView.vue";
 
@@ -10,6 +11,7 @@ export default createRouter({
   routes: [
     { path: "/", name: "diary", component: DiaryView },
     { path: "/assets", name: "assets", component: AssetsView },
+    { path: "/asset-stats", name: "assetStats", component: AssetStatsView },
     { path: "/stats", name: "stats", component: StatsView },
     { path: "/settings", name: "settings", component: SettingsView },
   ],

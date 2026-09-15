@@ -289,3 +289,151 @@ def distribution():
         "weekdays": weekdays,
         "periods": periods,
     })
+
+
+# ================= 资产统计分析（v2.4） =================
+
+GRANULARITIES = ("day", "month", "year")
+MAX_POINTS = 400          # 单次分析最多时间点数（防止按日跨多年导致图爆掉）
+
+
+def _period_key(d: dt.date, gran: str) -> str:
+    if gran == "day":
+        return d.isoformat()
+    if gran == "month":
+        return f"{d.year:04d}-{d.month:02d}"
+    return f"{d.year:04d}"
+
+
+def _bucket_label(key: str, gran: str) -> str:
+    if gran == "day":
+        return key[5:]            # 09-15
+    if gran == "month":
+        return key                # 2026-09
+    return f"{key}年"
+
+
+def _period_steps(start: dt.date, end: dt.date, gran: str) -> list:
+    """生成 [start, end] 内按粒度的完整时间点（用于补齐无流水的空档）。"""
+    out = []
+    if gran == "day":
+        cur = start
+        while cur <= end:
+            out.append(cur)
+            cur += dt.timedelta(days=1)
+    elif gran == "month":
+        cur = start.replace(day=1)
+        while cur <= end:
+            out.append(cur)
+            cur = dt.date(cur.year + 1, 1, 1) if cur.month == 12 else dt.date(cur.year, cur.month + 1, 1)
+    else:
+        cur = start.replace(month=1, day=1)
+        while cur <= end:
+            out.append(cur)
+            cur = dt.date(cur.year + 1, 1, 1)
+    return out
+
+
+def _csv(value) -> list:
+    return [x.strip() for x in (value or "").split(",") if x.strip()]
+
+
+@bp.get("/asset-analysis")
+def asset_analysis():
+    """资产统计分析：时间序列（收入/支出）+ 标签占比。
+
+    查询参数：
+      from / to     日期区间 YYYY-MM-DD（含端点，按本地日期；缺省=近 365 天）
+      granularity   day | month | year（默认 month）
+      accounts      账户 id 多选（逗号分隔，空=不限）
+      tags          标签多选（命中任一；空=不限）
+      flow          income | expense | both（默认 both）
+    说明：转账与校准不计入；一笔多标签按标签数量均摊，无标签计入"未分类"。
+    """
+    now = dt.datetime.now().astimezone()
+    today = date_of(now)
+    try:
+        d_from = dt.date.fromisoformat(request.args.get("from")) if request.args.get("from") \
+            else today - dt.timedelta(days=364)
+        d_to = dt.date.fromisoformat(request.args.get("to")) if request.args.get("to") else today
+    except ValueError:
+        return jsonify({"error": "日期格式应为 YYYY-MM-DD"}), 400
+    if d_from > d_to:
+        return jsonify({"error": "起始日期不能晚于结束日期"}), 400
+
+    gran = request.args.get("granularity") or "month"
+    if gran not in GRANULARITIES:
+        return jsonify({"error": "granularity 应为 day/month/year"}), 400
+    flow = request.args.get("flow") or "both"
+    if flow not in ("income", "expense", "both"):
+        return jsonify({"error": "flow 应为 income/expense/both"}), 400
+
+    accounts = _csv(request.args.get("accounts"))
+    tags = _csv(request.args.get("tags"))
+
+    steps = _period_steps(d_from, d_to, gran)
+    if len(steps) > MAX_POINTS:
+        return jsonify({
+            "error": f"时间点过多（{len(steps)}），请缩小日期范围或改用更粗的粒度"
+        }), 400
+
+    buckets = {_period_key(p, gran): {"income": 0.0, "expense": 0.0} for p in steps}
+    tag_income = {}
+    tag_expense = {}
+
+    g = data.load_global()
+    for t in g["txs"]:
+        ttype = t.get("type")
+        if ttype not in ("income", "expense"):
+            continue                      # 转账/校准不计入收支统计
+        if flow != "both" and ttype != flow:
+            continue
+        if accounts and t.get("account_id") not in accounts:
+            continue
+        try:
+            day = parse_ts(t.get("ts")).astimezone().date()
+        except (ValueError, TypeError):
+            continue
+        if not (d_from <= day <= d_to):
+            continue
+        ttags = [str(x).strip() for x in (t.get("tags") or []) if str(x).strip()]
+        if tags and not (set(ttags) & set(tags)):
+            continue
+
+        amount = int(t.get("amount_fen", 0)) / 100.0
+        key = _period_key(day, gran)
+        if key in buckets:
+            buckets[key][ttype] += amount
+
+        dist = tag_income if ttype == "income" else tag_expense
+        if ttags:                          # 多标签均摊，保证标签维度合计=总额
+            share = amount / len(ttags)
+            for tg in ttags:
+                dist[tg] = dist.get(tg, 0.0) + share
+        else:
+            dist["未分类"] = dist.get("未分类", 0.0) + amount
+
+    def _dist(m: dict) -> list:
+        return [{"tag": k, "amount": round(v, 2)}
+                for k, v in sorted(m.items(), key=lambda kv: kv[1], reverse=True)]
+
+    series = [{
+        "period": k,
+        "label": _bucket_label(k, gran),
+        "income": round(v["income"], 2),
+        "expense": round(v["expense"], 2),
+    } for k, v in buckets.items()]
+
+    total_income = round(sum(v["income"] for v in buckets.values()), 2)
+    total_expense = round(sum(v["expense"] for v in buckets.values()), 2)
+    return jsonify({
+        "from": d_from.isoformat(),
+        "to": d_to.isoformat(),
+        "granularity": gran,
+        "flow": flow,
+        "series": series,
+        "tag_income": _dist(tag_income),
+        "tag_expense": _dist(tag_expense),
+        "totals": {"income": total_income, "expense": total_expense,
+                   "net": round(total_income - total_expense, 2)},
+    })

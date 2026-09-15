@@ -82,6 +82,7 @@ async function doLock() {
           <div class="nav-links">
             <RouterLink to="/">日记</RouterLink>
             <RouterLink to="/assets">资产</RouterLink>
+            <RouterLink to="/asset-stats">资产统计</RouterLink>
             <RouterLink to="/stats">统计</RouterLink>
             <RouterLink to="/settings">设置</RouterLink>
           </div>
