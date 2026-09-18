@@ -203,6 +203,13 @@ async function saveEdit(t) {
         </div>
         <div class="tx-side">
           <span class="tx-amount" :class="t.type">{{ fmtMoney(t.amount) }}</span>
+          <span v-if="t.type !== 'transfer' && t.balance_after != null" class="tx-bal"
+                :title="'按最近一次校准逐笔重放到这笔之后的余额'">余：¥{{ t.balance_after.toFixed(2) }}</span>
+          <span v-else-if="t.type === 'transfer' && (t.balance_after_from != null || t.balance_after_to != null)"
+                class="tx-bal" :title="'转出账户 / 转入账户 该笔后的余额（无校准锚点则不显示）'">
+            余：{{ t.balance_after_from != null ? '¥' + t.balance_after_from.toFixed(2) : '—' }}
+            / {{ t.balance_after_to != null ? '¥' + t.balance_after_to.toFixed(2) : '—' }}
+          </span>
           <span class="tx-time">{{ formatTime(t.ts) }}</span>
           <div v-if="t.type !== 'adjust'" class="tx-ops">
             <button v-if="confirmDeleteId !== t.id" type="button" class="ghost tiny"

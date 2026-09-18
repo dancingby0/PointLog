@@ -193,6 +193,60 @@ def _csv_ids(value) -> list:
     return [x.strip() for x in (value or "").split(",") if x.strip()]
 
 
+def _build_balance_map(g: dict) -> dict:
+    """{(account_id, tx_id): balance_after_fen}：每笔发生后的账户余额。
+
+    以该账户最近的"校准(adjust)"（balance_after_fen）为锚点，其后的流水逐笔
+    应用到每笔之后；锚点之前的流水（已体现在校准值里）不再重复计算。
+    无校准锚点的账户/笔 → 该笔无余额（None，前端不显示）。
+    """
+    by_account = {}
+    for t in g["txs"]:
+        accs = {t.get("account_id"), t.get("from_account"), t.get("to_account")}
+        accs.discard(None)
+        for acc in accs:
+            by_account.setdefault(acc, []).append((t.get("ts", ""), str(t.get("id", "")), t))
+
+    index = {}
+    for acc, items in by_account.items():
+        items.sort(key=lambda x: (x[0], x[1]))
+        bal = None
+        anchored = False
+        for _, tid, t in items:
+            kind = t.get("type")
+            amt = int(t.get("amount_fen", 0))
+            if kind == "adjust":
+                bal = int(t.get("balance_after_fen", 0))
+                anchored = True
+            elif not anchored:
+                continue
+            else:
+                if t.get("account_id") == acc:
+                    if kind == "expense":
+                        bal -= amt
+                    elif kind == "income":
+                        bal += amt
+                if t.get("from_account") == acc:
+                    bal -= amt
+                if t.get("to_account") == acc:
+                    bal += amt
+            index[(acc, tid)] = bal
+    return index
+
+
+def _attach_balances(ser: dict, t: dict, bmap: dict) -> None:
+    """给序列化流水挂上该笔后的账户余额（无锚点 → null，前端不显示）。"""
+    tid = t.get("id")
+    if t.get("type") == "transfer":
+        fa = bmap.get((t.get("from_account"), tid))
+        ta = bmap.get((t.get("to_account"), tid))
+        ser["balance_after_from"] = round(fa / 100.0, 2) if fa is not None else None
+        ser["balance_after_to"] = round(ta / 100.0, 2) if ta is not None else None
+    else:
+        ba = bmap.get((t.get("account_id"), tid))
+        ser["balance_after"] = round(ba / 100.0, 2) if ba is not None else None
+
+
 @bp.get("/transactions")
 def list_transactions():
     """流水列表（新→旧）：支持筛选与分页。
@@ -264,10 +318,10 @@ def list_transactions():
                 continue
             if unsettled_only and day.isoformat() in settled_days:
                 continue
-        rows.append(_serialize_tx(t))
+        rows.append((t, _serialize_tx(t)))
 
     # 新→旧；同秒多笔时以记录 id（毫秒，越晚越大）为次级排序
-    rows.sort(key=lambda t: (t["ts"], str(t.get("id") or "")), reverse=True)
+    rows.sort(key=lambda p: (p[1]["ts"], str(p[1].get("id") or "")), reverse=True)
     total = len(rows)
 
     page_raw = request.args.get("page")
@@ -279,9 +333,16 @@ def list_transactions():
             return jsonify({"error": "分页参数不正确"}), 400
         size = max(1, min(size, 200))
         start = (page - 1) * size
-        items = rows[start:start + size]
+        part = rows[start:start + size]
     else:
-        page, size, items = 1, total, rows
+        page, size, part = 1, total, rows
+
+    # 每笔"该笔后余额"：以最近校准为锚点逐笔重放（无锚点 → null 不显示）
+    balance_map = _build_balance_map(g)
+    items = []
+    for t, ser in part:
+        _attach_balances(ser, t, balance_map)
+        items.append(ser)
 
     # 可供筛选的标签集合（全部流水出现过的标签，不受当前筛选影响）
     available_tags = sorted({tg for t in g["txs"] for tg in (t.get("tags") or []) if tg})

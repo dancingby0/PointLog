@@ -431,6 +431,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .tx-amount.expense { color: var(--danger); }
 .tx-amount.income { color: #15803d; }
 .tx-time { color: var(--muted); font-size: 12px; }
+.tx-bal { color: var(--text); font-size: 12px; font-weight: 600; }
 
 .tx-edit {
   flex-basis: 100%;

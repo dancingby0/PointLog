@@ -436,6 +436,32 @@ class AssetsApiTest(ApiTestCase):
         self.assertEqual(self._get_txs(f"?tags={quote('打车')}")["total"], 1)
         self.assertEqual(self._get_txs(f"?tags={quote('餐饮')}")["total"], 0)
 
+    def test_balance_after_each_tx(self):
+        """每笔后余额：最近校准为锚点逐笔重放；锚点前流水不重复计；无锚点=null。"""
+        a = self._mk_acct("A", "asset", 0)
+        b = self._mk_acct("B", "asset", 0)
+        # 锚点之前的一笔（余额已含在后续校准值里，不应重复计算 → 不显示余额）
+        self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": a["id"], "amount": 5, "note": "锚点前的旧账"})
+        # 锚点：A 校准到 200
+        self.client.post(f"/api/accounts/{a['id']}/adjust", json={"balance": 200, "note": "校准A"})
+        self.client.post("/api/transactions", json={
+            "type": "expense", "account_id": a["id"], "amount": 10, "note": "支出x"})
+        self.client.post("/api/transactions", json={
+            "type": "income", "account_id": a["id"], "amount": 20, "note": "收入y"})
+        self.client.post("/api/transactions", json={
+            "type": "transfer", "from": a["id"], "to": b["id"], "amount": 30, "note": "转给B"})
+
+        txs = self.client.get("/api/transactions").get_json()["transactions"]
+        by_note = {t["note"]: t for t in txs}
+        self.assertEqual(by_note["锚点前的旧账"]["balance_after"], None)   # 锚点前
+        self.assertEqual(by_note["校准A"]["balance_after"], 200.0)
+        self.assertEqual(by_note["支出x"]["balance_after"], 190.0)        # 200 - 10
+        self.assertEqual(by_note["收入y"]["balance_after"], 210.0)        # 190 + 20
+        tr = by_note["转给B"]
+        self.assertEqual(tr["balance_after_from"], 180.0)                 # 210 - 30
+        self.assertEqual(tr["balance_after_to"], None)                    # B 无锚点
+
     def test_transactions_filter_invert(self):
         """反选：勾上=排除所选项（渠道/类型/标签各自可取反）。"""
         from urllib.parse import quote
