@@ -2,6 +2,7 @@
 
 import datetime as dt
 import unittest
+from unittest import mock
 
 from base import ApiTestCase
 from utils import date_of
@@ -47,6 +48,38 @@ class DaysApiTest(ApiTestCase):
     def test_days_future_month_rejected(self):
         r = self.client.get("/api/days?month=2099-01")
         self.assertEqual(r.status_code, 400)
+
+    def test_days_new_month_visible_before_4am(self):
+        """凌晨 0–4 点已进入新自然月：新月份可查看，但该月各天仍标记为未来。"""
+        tz = dt.timezone(dt.timedelta(hours=8))
+        fake = dt.datetime(2026, 10, 1, 1, 30, tzinfo=tz)   # 4 点界仍属 09-30
+        with mock.patch("routes.days._now", return_value=fake):
+            r = self.client.get("/api/days?month=2026-10")
+            self.assertEqual(r.status_code, 200)
+            days = r.get_json()["days"]
+            self.assertEqual(days[0]["date"], "2026-10-01")
+            self.assertTrue(all(d["is_future"] for d in days))       # 整月尚不可打卡
+            self.assertFalse(any(d["is_today"] for d in days))
+
+            # "今天"仍在 9 月：该月 09-30 标为今天
+            r2 = self.client.get("/api/days?month=2026-09")
+            self.assertEqual(r2.status_code, 200)
+            by_date = {d["date"]: d for d in r2.get_json()["days"]}
+            self.assertTrue(by_date["2026-09-30"]["is_today"])
+
+            # 更远的未来自然月仍拒绝
+            self.assertEqual(self.client.get("/api/days?month=2026-11").status_code, 400)
+
+    def test_days_new_month_is_today_after_4am(self):
+        """过了 4:00 后，"今天"即新月份 1 号 → 该月 1 号不再是未来。"""
+        tz = dt.timezone(dt.timedelta(hours=8))
+        fake = dt.datetime(2026, 10, 1, 5, 0, tzinfo=tz)
+        with mock.patch("routes.days._now", return_value=fake):
+            r = self.client.get("/api/days?month=2026-10")
+            self.assertEqual(r.status_code, 200)
+            days = r.get_json()["days"]
+            self.assertTrue(days[0]["is_today"])
+            self.assertFalse(days[0]["is_future"])
 
     def test_calendar_levels(self):
         """贡献日历：默认只返回"当年 1月1日→今天"，每日点数与五档强度正确。"""

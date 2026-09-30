@@ -63,7 +63,11 @@ export const state = reactive({
 });
 
 // ---------- 小工具（组件共用） ----------
-export const todayStr = () => toDateStr(new Date());
+// "今天"：按凌晨4点规则归属（0:00–4:00 属于前一天），与打卡/记录归属保持一致
+export const todayStr = () => dayOf(new Date().toISOString());
+
+// "当前自然月"：日期选择器可查看的月份上限（凌晨 0–4 点也算已进入新月份）
+export const calendarMonthStr = () => toDateStr(new Date()).slice(0, 7);
 
 export function selectedLabel() {
   if (!state.selectedDay) return "";
@@ -495,18 +499,23 @@ export async function loadDays() {
 function pickMonthDay() {
   const todayIn = state.days.find((d) => d.is_today);
   if (todayIn) return todayIn.date;
-  return state.days[state.days.length - 1].date;
+  // 该月没有"今天"（例如凌晨 0–4 点查看刚进入的新月份）：取最近的非未来天
+  const past = [...state.days].reverse().find((d) => !d.is_future);
+  return past ? past.date : null;   // 整月都为未来 → 不改动当前选中日
 }
 
 async function reloadMonthView() {
   await loadDays();
-  await selectDay(pickMonthDay());
+  const target = pickMonthDay();
+  if (target) await selectDay(target);
 }
 
 export async function onYearChange(ev) {
   const year = ev.target.value;
   const month = state.viewMonth.slice(5, 7);
-  state.viewMonth = `${year}-${month}`;
+  const ym = `${year}-${month}`;
+  if (ym > calendarMonthStr()) { alert("不能查看未来月份"); return; }
+  state.viewMonth = ym;
   await reloadMonthView();
 }
 
@@ -514,8 +523,7 @@ export async function onMonthChange(ev) {
   const month = ev.target.value;
   const year = state.viewMonth.slice(0, 4);
   const ym = `${year}-${month}`;
-  const cur = todayStr().slice(0, 7);
-  if (ym > cur) { alert("不能查看未来月份"); return; }
+  if (ym > calendarMonthStr()) { alert("不能查看未来月份"); return; }
   state.viewMonth = ym;
   await reloadMonthView();
 }
@@ -524,8 +532,7 @@ export async function shiftMonth(delta) {
   const d = fromDateStr(state.viewMonth + "-01");
   d.setMonth(d.getMonth() + delta);
   const ym = toDateStr(d).slice(0, 7);
-  const cur = todayStr().slice(0, 7);
-  if (ym > cur) { alert("不能查看未来月份"); return; }
+  if (ym > calendarMonthStr()) { alert("不能查看未来月份"); return; }
   state.viewMonth = ym;
   await reloadMonthView();
 }

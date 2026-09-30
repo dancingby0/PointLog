@@ -12,6 +12,11 @@ from utils import date_of, parse_ts
 bp = Blueprint("days", __name__, url_prefix="/api")
 
 
+def _now() -> dt.datetime:
+    """当前本地时间（独立函数，便于测试注入指定时刻）。"""
+    return dt.datetime.now().astimezone()
+
+
 def _level_of(points: int) -> int:
     """把每日点数映射为贡献强度等级（0~4，GitHub 风格，简化分档）。"""
     if points <= 0:
@@ -53,10 +58,14 @@ def list_days():
 
     每天含 {date, points, has_note, is_today, is_future}，
     供"年+月 → 当月每天列表"式日期选择器使用。
+
+    - "今天"（is_today）按凌晨4点规则归属（0:00–4:00 属于前一天）；
+    - 可查看的月份上限为"当前自然月"：凌晨 0–4 点也已进入新月份，
+      此时新月份的各天仍标记为 is_future（尚不可打卡）。
     """
     d = data.load(config.CURRENT_PROFILE)
-    now = dt.datetime.now().astimezone()
-    today = date_of(now)
+    now = _now()
+    today = date_of(now)            # 凌晨4点界日："今天"
 
     month_str = request.args.get("month")
     if month_str:
@@ -68,7 +77,7 @@ def list_days():
     else:
         first = today.replace(day=1)
 
-    cur_first = today.replace(day=1)
+    cur_first = now.date().replace(day=1)   # 当前自然月首日
     if first > cur_first:
         return jsonify({"error": "不能查看未来月份"}), 400
 
@@ -99,7 +108,7 @@ def points_line():
     返回计算过程，便于前端展示与校验。
     """
     d = data.load(config.CURRENT_PROFILE)
-    now = dt.datetime.now().astimezone()
+    now = _now()
     today = date_of(now)
 
     window_days = 60
@@ -125,7 +134,7 @@ def calendar():
     - 历史年：显示该年完整 1月1日 → 12月31日
     """
     d = data.load(config.CURRENT_PROFILE)
-    now = dt.datetime.now().astimezone()
+    now = _now()
     today = date_of(now)
 
     year_str = request.args.get("year")

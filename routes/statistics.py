@@ -99,12 +99,12 @@ def asset_trend():
         return jsonify({"error": "months 应为整数"}), 400
 
     now = dt.datetime.now().astimezone()
-    today = date_of(now)
     g = data.load_global()
 
     # 生成近 months 个月 (year, month) 序列（新→旧再反转）
+    # 注：资产流水按"自然月"聚合（ts 直接取 %Y-%m），故桶上限用自然月
     buckets = []
-    y, m = today.year, today.month
+    y, m = now.year, now.month
     for _ in range(months):
         buckets.append((y, m))
         m -= 1
