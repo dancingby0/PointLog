@@ -6,6 +6,7 @@ import DayPicker from "../components/DayPicker.vue";
 import ContribCalendar from "../components/ContribCalendar.vue";
 import EntryForm from "../components/EntryForm.vue";
 import EntryList from "../components/EntryList.vue";
+import EntryExportCard from "../components/EntryExportCard.vue";
 import NoteCard from "../components/NoteCard.vue";
 import MemoCard from "../components/MemoCard.vue";
 </script>
@@ -19,6 +20,7 @@ import MemoCard from "../components/MemoCard.vue";
     <ContribCalendar />
     <EntryForm />
     <EntryList />
+    <EntryExportCard />
     <NoteCard />
     <MemoCard />
   </div>

@@ -36,6 +36,24 @@ export function formatTime(iso) {
   return new Date(iso).toLocaleString("zh-CN", { hour12: false });
 }
 
+// ISO → HH:MM（本地，用于时段起止的紧凑显示）
+export function formatClock(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// 分钟数 → 可读消耗时长：90 → "1 小时 30 分"；45 → "45 分钟"
+export function formatDuration(min) {
+  const total = Math.round(Number(min) || 0);
+  if (total <= 0) return "0 分钟";
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (!h) return `${m} 分钟`;
+  if (!m) return `${h} 小时`;
+  return `${h} 小时 ${m} 分`;
+}
+
 // ---------- 贡献日历：把每日数组排成 GitHub 风格热力图网格（周一为每周起点） ----------
 export function buildContribGrid(days) {
   if (!days.length) return { weeks: [], months: [] };

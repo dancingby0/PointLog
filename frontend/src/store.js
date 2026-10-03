@@ -36,7 +36,7 @@ export const state = reactive({
   statsAssets: [],        // 统计：收支月度趋势
   assetStats: null,       // 资产统计分析（筛选+粒度+折线/饼图）
   editingId: null,        // 正在编辑的记录 id
-  form: { content: "", points: 1, category: "", ts: "" },
+  form: { content: "", points: 1, category: "", start: "", end: "", ts: "" },
   noteDraft: "",          // 感想草稿
   hasNote: false,         // 当天是否有感想
   noteEditing: false,     // 是否在编辑感想
@@ -480,9 +480,6 @@ export function defaultTsFor(day) {
 
 export async function selectDay(day) {
   state.selectedDay = day;
-  if (!state.editingId) {
-    state.form.ts = defaultTsFor(day);
-  }
   await loadEntries();
   await loadNote();
 }
@@ -634,14 +631,45 @@ export async function submitEntry() {
     category: state.form.category || null,
   };
   if (!payload.content) return;
+  if (!Number.isInteger(payload.points) || payload.points < 0) {
+    alert("点数必须是 0 或正整数（0 点＝只记录）");
+    return;
+  }
 
+  // 归属时刻（内部用，决定属于哪一天）：不选时间时按当前所选天
+  // 今天＝现在；查看历史某天＝当天 12:00
   const tsInput = state.form.ts || defaultTsFor(state.selectedDay);
-  const d = new Date(tsInput);
-  if (Number.isNaN(d.getTime())) {
+  const ownerTs = new Date(tsInput);
+  if (Number.isNaN(ownerTs.getTime())) {
     alert("时间格式不正确");
     return;
   }
-  payload.ts = d.toISOString();
+  payload.ts = ownerTs.toISOString();
+
+  // 可选时段：起、止要么都填、要么都留空；填了就等于记录"从 xx 起到 xx 结束"
+  const startInput = state.form.start;
+  const endInput = state.form.end;
+  if ((startInput && !endInput) || (!startInput && endInput)) {
+    alert("开始与结束时间要同时填写，或都留空");
+    return;
+  }
+  if (startInput && endInput) {
+    const ds = new Date(startInput);
+    const de = new Date(endInput);
+    if (Number.isNaN(ds.getTime()) || Number.isNaN(de.getTime())) {
+      alert("时间格式不正确");
+      return;
+    }
+    if (de <= ds) {
+      alert("结束时间要晚于开始时间");
+      return;
+    }
+    payload.start_ts = ds.toISOString();
+    payload.end_ts = de.toISOString();
+  } else {
+    payload.start_ts = null;   // 不选时间：只记录，不计时长
+    payload.end_ts = null;
+  }
 
   const url = state.editingId ? `/api/entries/${state.editingId}` : "/api/entries";
   const method = state.editingId ? "PUT" : "POST";
@@ -657,7 +685,6 @@ export async function submitEntry() {
     const ownerDay = dayOf(data.ts);
     if (ownerDay !== state.selectedDay) {
       state.selectedDay = ownerDay;
-      state.form.ts = defaultTsFor(ownerDay);
     }
     await refresh();
   } catch (err) {
@@ -670,6 +697,8 @@ export function startEdit(entry) {
   state.form.content = entry.content;
   state.form.points = entry.points;
   state.form.category = entry.category || "";
+  state.form.start = entry.start_ts ? toLocalInput(new Date(entry.start_ts)) : "";
+  state.form.end = entry.end_ts ? toLocalInput(new Date(entry.end_ts)) : "";
   state.form.ts = toLocalInput(new Date(entry.ts));
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -679,7 +708,9 @@ export function endEdit() {
   state.form.content = "";
   state.form.points = 1;
   state.form.category = "";
-  state.form.ts = defaultTsFor(state.selectedDay);
+  state.form.start = "";
+  state.form.end = "";
+  state.form.ts = "";          // 新增时留空 → 提交时按所选天取默认归属时刻
 }
 
 export async function refresh() {
@@ -953,33 +984,62 @@ export async function exportAssets(from = "", to = "") {
   return data;
 }
 
-// 下载模式：以附件下载到浏览器（download=1，不在服务端落盘）；返回文件名
-export async function downloadAssets(from = "", to = "") {
-  const p = new URLSearchParams();
-  if (from) p.set("from", from);
-  if (to) p.set("to", to);
-  p.set("download", "1");
-  const res = await fetch(`/api/assets/export?${p.toString()}`);
+// 下载模式：以附件下载到浏览器（不在服务端落盘）；返回文件名
+// 文件名优先取后端 Content-Disposition（filename*=UTF-8''…），否则用兜底名
+async function downloadAttachment(url, fallbackName) {
+  const res = await fetch(url);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || "导出失败");
   }
   const blob = await res.blob();
-  // 文件名优先取后端 Content-Disposition（filename*=UTF-8''…）
-  let name = `assets-${toDateStr(new Date())}.json`;
+  let name = fallbackName;
   const m = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get("Content-Disposition") || "");
   if (m) {
     try { name = decodeURIComponent(m[1]); } catch (err) { /* 保留兜底文件名 */ }
   }
-  const url = URL.createObjectURL(blob);
+  const objUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
+  a.href = objUrl;
   a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  URL.revokeObjectURL(objUrl);
   return name;
+}
+
+export async function downloadAssets(from = "", to = "") {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  p.set("download", "1");
+  return downloadAttachment(`/api/assets/export?${p.toString()}`,
+    `assets-${toDateStr(new Date())}.json`);
+}
+
+
+// ---- 打卡记录导出（按归属日期区间） ----
+// from / to 均为 YYYY-MM-DD（含端点，按凌晨 4 点归属日），留空表示不限；
+// 导出内容中记录按归属日 + 时间升序（早 → 晚）。
+// 默认由后端写入 <项目根>/exports/，返回落盘信息 { filename, rel_path, entry_count, ... }
+export async function exportEntries(from = "", to = "") {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  const res = await fetch(`/api/entries/export?${p.toString()}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "导出失败");
+  return data;
+}
+
+export async function downloadEntries(from = "", to = "") {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  p.set("download", "1");
+  return downloadAttachment(`/api/entries/export?${p.toString()}`,
+    `entries-${toDateStr(new Date())}.json`);
 }
 
 

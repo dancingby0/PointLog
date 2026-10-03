@@ -51,6 +51,31 @@ class SummaryApiTest(ApiTestCase):
         r = self.client.get("/api/stats/summary?range=haha")
         self.assertEqual(r.status_code, 400)
 
+    def test_zero_points_day_is_not_active(self):
+        """0 点记录＝只记录：不计入打卡天数/连续天数，但内容仍在当天记录里。"""
+        today = date_of(dt.datetime.now().astimezone())
+        r = self.client.post("/api/entries", json={
+            "content": "只记录",
+            "points": 0,
+            "ts": dt.datetime.combine(today, dt.time(12, 0)).astimezone().isoformat(),
+        })
+        self.assertEqual(r.status_code, 201, r.get_json())
+
+        body = self.client.get("/api/stats/summary?range=month").get_json()
+        self.assertEqual(body["total_days"], 0)
+        self.assertEqual(body["period_points"], 0)
+        self.assertEqual(body["current_streak"], 0)
+        # 当天仍能看到这条记录（只是不激励）
+        listed = self.client.get(f"/api/entries?day={today.isoformat()}").get_json()
+        self.assertTrue(any(e["content"] == "只记录" for e in listed["entries"]))
+
+        # 再加一条有分的记录 → 当天才算打卡日
+        self._add(today, 2)
+        body2 = self.client.get("/api/stats/summary?range=month").get_json()
+        self.assertEqual(body2["total_days"], 1)
+        self.assertEqual(body2["period_points"], 2)
+        self.assertEqual(body2["current_streak"], 1)
+
     def test_trend_by_month(self):
         today = date_of(dt.datetime.now().astimezone())
         # 本月今天 + 上月同一天

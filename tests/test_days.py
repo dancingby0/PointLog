@@ -176,5 +176,28 @@ class DaysApiTest(ApiTestCase):
         self.assertAlmostEqual(body["baseline"], 6.8, places=2)
 
 
+class ZeroPointsCalendarTest(ApiTestCase):
+    """0 点记录＝只记录：贡献日历当天不点亮（points 0 / level 0）。"""
+
+    def test_zero_points_entry_does_not_light_calendar(self):
+        today = date_of(dt.datetime.now().astimezone())
+        r = self.client.post("/api/entries", json={
+            "content": "只记录",
+            "points": 0,
+            "ts": dt.datetime.combine(today, dt.time(12, 0)).astimezone().isoformat(),
+        })
+        self.assertEqual(r.status_code, 201, r.get_json())
+
+        arr = self.client.get(f"/api/calendar?year={today.year}").get_json()
+        by_date = {x["date"]: x for x in arr}
+        self.assertEqual(by_date[today.isoformat()]["points"], 0)
+        self.assertEqual(by_date[today.isoformat()]["level"], 0)
+
+        # 当天点数列表也保持 0（记录仍可见）
+        days = {d["date"]: d for d in
+                self.client.get(f"/api/days?month={today.strftime('%Y-%m')}").get_json()["days"]}
+        self.assertEqual(days[today.isoformat()]["points"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -159,6 +159,96 @@ class EntriesApiTest(ApiTestCase):
         body = r.get_json()
         self.assertIsNone(body.get("category"))
 
+    def test_zero_points_entry_allowed(self):
+        """0 点＝单纯记录（不做激励）：可创建、不出错，当天点数仍是 0。"""
+        r = self.client.post("/api/entries", json={"content": "只是记录", "points": 0})
+        self.assertEqual(r.status_code, 201, r.get_json())
+        self.assertEqual(r.get_json()["points"], 0)
+
+        body = self.client.get("/api/entries").get_json()
+        self.assertEqual(body["day_points"], 0)
+        self.assertTrue(any(e["content"] == "只是记录" for e in body["entries"]))
+
+    def test_create_with_span_gives_duration(self):
+        """可选时段：有起止就有消耗时长；不填则为 null（默认不选时间）。"""
+        now = dt.datetime.now().astimezone()
+        today = date_of(now)
+        start = dt.datetime.combine(today, dt.time(9, 0)).astimezone()
+        end = dt.datetime.combine(today, dt.time(10, 30)).astimezone()
+
+        r = self.client.post("/api/entries", json={
+            "content": "写作业",
+            "points": 2,
+            "ts": dt.datetime.combine(today, dt.time(11, 0)).astimezone().isoformat(),
+            "start_ts": start.isoformat(),
+            "end_ts": end.isoformat(),
+        })
+        self.assertEqual(r.status_code, 201, r.get_json())
+        body = r.get_json()
+        self.assertEqual(body["duration_min"], 90)
+        self.assertEqual(body["start_ts"], start.isoformat())
+
+        # 不填时段：默认不选时间
+        r2 = self.client.post("/api/entries", json={"content": "只记录", "points": 1})
+        body2 = r2.get_json()
+        self.assertIsNone(body2["start_ts"])
+        self.assertIsNone(body2["end_ts"])
+        self.assertIsNone(body2["duration_min"])
+
+        # 当天列表也会带上派生时长
+        listed = self.client.get("/api/entries").get_json()["entries"]
+        by_content = {e["content"]: e for e in listed}
+        self.assertEqual(by_content["写作业"]["duration_min"], 90)
+        self.assertIsNone(by_content["只记录"]["duration_min"])
+
+    def test_span_requires_both_ends(self):
+        """只填一端 → 400（起止要么都填、要么都空）。"""
+        now = dt.datetime.now().astimezone().isoformat()
+        r = self.client.post("/api/entries", json={
+            "content": "只填开始", "points": 1, "start_ts": now,
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_span_end_must_be_after_start(self):
+        now = dt.datetime.now().astimezone().isoformat()
+        r = self.client.post("/api/entries", json={
+            "content": "同一时刻", "points": 1, "start_ts": now, "end_ts": now,
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_span_bad_format(self):
+        r = self.client.post("/api/entries", json={
+            "content": "格式错", "points": 1,
+            "start_ts": "not-a-time", "end_ts": "also-bad",
+        })
+        self.assertEqual(r.status_code, 400)
+
+    def test_update_span_then_clear(self):
+        """编辑：可写入时段、只改点数时保留时段、传 null 清空为"不选时间"。"""
+        r = self.client.post("/api/entries", json={"content": "写作业", "points": 2})
+        eid = r.get_json()["id"]
+
+        start = dt.datetime(2026, 9, 10, 9, 0).astimezone()
+        end = dt.datetime(2026, 9, 10, 10, 0).astimezone()
+        r = self.client.put(f"/api/entries/{eid}", json={
+            "start_ts": start.isoformat(), "end_ts": end.isoformat()})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["duration_min"], 60)
+
+        # 只改点数：时段保持
+        r = self.client.put(f"/api/entries/{eid}", json={"points": 5})
+        self.assertEqual(r.get_json()["duration_min"], 60)
+
+        # 两端都传 null → 清空时段
+        r = self.client.put(f"/api/entries/{eid}", json={"start_ts": None, "end_ts": None})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertIsNone(r.get_json()["start_ts"])
+        self.assertIsNone(r.get_json()["duration_min"])
+
+        # 只清一端 → 400
+        r = self.client.put(f"/api/entries/{eid}", json={"start_ts": start.isoformat()})
+        self.assertEqual(r.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

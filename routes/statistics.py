@@ -11,7 +11,7 @@ from flask import Blueprint, jsonify, request
 import config
 import data
 import stats
-from utils import date_of, parse_ts
+from utils import date_of, day_points_of, parse_ts
 
 bp = Blueprint("statistics", __name__, url_prefix="/api/stats")
 
@@ -30,16 +30,8 @@ def _parse_range(name: str, today: dt.date):
 
 
 def _day_points_of(entries: list) -> dict:
-    """把打卡 ts 按凌晨4点规则归到 {date: 点数}。"""
-    out = {}
-    for e in entries:
-        try:
-            t = parse_ts(e["ts"])
-        except (ValueError, TypeError):
-            continue
-        k = date_of(t)
-        out[k] = out.get(k, 0) + int(e.get("points", 0))
-    return out
+    """把打卡 ts 按凌晨4点规则归到 {date: 点数}（0 点记录不计入打卡日）。"""
+    return day_points_of(entries)
 
 
 def _day_points_map_if_present(d: dict) -> dict:

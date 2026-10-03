@@ -7,7 +7,7 @@ from flask import Blueprint, jsonify, request
 import data
 import stats
 import config
-from utils import date_of, parse_ts
+from utils import date_of, day_points_of
 
 bp = Blueprint("days", __name__, url_prefix="/api")
 
@@ -31,16 +31,8 @@ def _level_of(points: int) -> int:
 
 
 def _day_points_map(d: dict) -> dict:
-    """把档案里的打卡记录归总为 {date: 总点数}。"""
-    day_points = {}
-    for e in d["entries"]:
-        try:
-            t = parse_ts(e["ts"])
-        except (ValueError, TypeError):
-            continue
-        k = date_of(t)
-        day_points[k] = day_points.get(k, 0) + int(e.get("points", 0))
-    return day_points
+    """把档案里的打卡记录归总为 {date: 总点数}（0 点记录不计入打卡日）。"""
+    return day_points_of(d.get("entries", []))
 
 
 def _month_last_day(year: int, month: int) -> dt.date:

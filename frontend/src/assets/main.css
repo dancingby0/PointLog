@@ -88,6 +88,17 @@ button:hover { filter: brightness(1.05); }
   font-size: 12px;
 }
 .entry-points { font-weight: 700; color: var(--accent); white-space: nowrap; }
+.entry-duration {
+  background: #ecfdf5;
+  color: #047857;
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* ---- 打卡时段（起 → 止）输入行 ---- */
+.span-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.span-row input[type="datetime-local"] { width: auto; padding: 4px 8px; }
 .entry .delete {
   background: transparent;
   color: var(--danger);
@@ -483,7 +494,7 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .settle-tag.on { background: #dcfce7; border-color: #bbf7d0; color: #15803d; }
 .settle-tag .tag-x { line-height: 1; }
 
-/* ---- 资产导出卡片 ---- */
+/* ---- 导出卡片（资产 / 打卡共用） ---- */
 .export-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .export-row + .export-row { margin-top: 8px; }
 .export-row input[type="date"] { width: auto; padding: 4px 8px; }
