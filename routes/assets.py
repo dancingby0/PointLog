@@ -4,8 +4,10 @@
 """
 
 import datetime as dt
+import json
+from urllib.parse import quote
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 import data
 from utils import parse_ts
@@ -600,4 +602,87 @@ def delete_transaction(tx_id: str):
     g["txs"] = [t for t in g["txs"] if t.get("id") != tx_id]
     data.save_global(g)
     return jsonify({"ok": True})
+
+
+def _tx_ts_key(t: dict):
+    """流水排序键：发生时间（时间戳）+ 记录 id，均升序；时间不可解析的排在最前。"""
+    try:
+        return (parse_ts(t.get("ts")).timestamp(), str(t.get("id") or ""))
+    except (ValueError, TypeError):
+        return (float("-inf"), str(t.get("id") or ""))
+
+
+@bp.get("/assets/export")
+def export_assets():
+    """资产数据导出为 JSON 文件。
+
+    查询参数（都可省略；省略即不限）：
+      from / to   发生日期区间 YYYY-MM-DD（含端点，按本地自然日）
+
+    返回内容与 assets.json 同构（asset_tags / accounts / txs / settled_days），
+    另附 meta（导出时间、范围、条数、金额单位）。其中：
+    - txs 按发生时间**升序**（早→晚）排列，同一时刻按记录 id 升序；
+    - settled_days 只导出区间内的日期（未指定范围则全部）。
+    """
+    date_from = (request.args.get("from") or "").strip()
+    date_to = (request.args.get("to") or "").strip()
+    try:
+        d_from = dt.date.fromisoformat(date_from) if date_from else None
+        d_to = dt.date.fromisoformat(date_to) if date_to else None
+    except ValueError:
+        return jsonify({"error": "日期格式应为 YYYY-MM-DD"}), 400
+    if d_from and d_to and d_from > d_to:
+        return jsonify({"error": "起始日期不能晚于结束日期"}), 400
+    f_iso = d_from.isoformat() if d_from else None
+    t_iso = d_to.isoformat() if d_to else None
+
+    g = data.load_global()
+
+    def in_range(t: dict) -> bool:
+        if not (d_from or d_to):
+            return True
+        try:
+            day = parse_ts(t.get("ts")).astimezone().date()
+        except (ValueError, TypeError):
+            return False
+        if d_from and day < d_from:
+            return False
+        if d_to and day > d_to:
+            return False
+        return True
+
+    txs = [t for t in g.get("txs", []) if in_range(t)]
+    txs.sort(key=_tx_ts_key)          # 时间顺序（升序）
+
+    settled = sorted(
+        str(d) for d in (g.get("settled_days") or [])
+        if (f_iso is None or str(d) >= f_iso) and (t_iso is None or str(d) <= t_iso)
+    )
+
+    now = dt.datetime.now().astimezone()
+    payload = {
+        "meta": {
+            "exported_at": now.isoformat(timespec="seconds"),
+            "range": {"from": f_iso, "to": t_iso},
+            "amount_unit": "fen",          # 金额单位：分（整数）
+            "account_count": len(g.get("accounts", [])),
+            "tx_count": len(txs),
+        },
+        "asset_tags": g.get("asset_tags", []),
+        "accounts": g.get("accounts", []),
+        "txs": txs,
+        "settled_days": settled,
+    }
+
+    if f_iso and t_iso:
+        span = f"{f_iso}_{t_iso}"
+    else:
+        span = f_iso or t_iso or "all"
+    filename = f"assets-{span}-{now.strftime('%Y%m%d-%H%M%S')}.json"
+
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    resp = Response(body, mimetype="application/json")
+    # filename* 支持中文/特殊字符
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+    return resp
 

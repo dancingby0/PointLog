@@ -940,6 +940,36 @@ export async function setDaySettled(day, settled) {
 }
 
 
+// ---- 导出（按发生日期区间，JSON 文件下载） ----
+// from / to 均为 YYYY-MM-DD（含端点），留空表示不限；导出内容中流水按时间升序。
+export async function exportAssets(from = "", to = "") {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  const res = await fetch(`/api/assets/export?${p.toString()}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "导出失败");
+  }
+  const blob = await res.blob();
+  // 文件名优先取后端 Content-Disposition（filename*=UTF-8''…）
+  let name = `assets-${toDateStr(new Date())}.json`;
+  const m = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get("Content-Disposition") || "");
+  if (m) {
+    try { name = decodeURIComponent(m[1]); } catch (err) { /* 保留兜底文件名 */ }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return name;
+}
+
+
 // ================= 统计 =================
 
 export async function loadStatsSummary() {

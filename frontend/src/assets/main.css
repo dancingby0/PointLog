@@ -483,6 +483,12 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .settle-tag.on { background: #dcfce7; border-color: #bbf7d0; color: #15803d; }
 .settle-tag .tag-x { line-height: 1; }
 
+/* ---- 资产导出卡片 ---- */
+.export-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.export-row + .export-row { margin-top: 8px; }
+.export-row input[type="date"] { width: auto; padding: 4px 8px; }
+.export-msg { margin: 8px 0 0; font-size: 13px; color: var(--muted); word-break: break-all; }
+
 /* ---- 资产统计页 ---- */
 .as-summary { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 4px; }
 .as-summary b { color: var(--text); }
