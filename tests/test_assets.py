@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from pathlib import Path
 from urllib.parse import unquote
 
 from base import ApiTestCase
@@ -516,10 +517,19 @@ class AssetsApiTest(ApiTestCase):
             self.client.get("/api/transactions?from=2026-09-16&to=2026-09-15").status_code, 400)
         self.assertEqual(self.client.get("/api/transactions?page=abc").status_code, 400)
 
-    def test_export_assets_range_and_time_order(self):
-        """导出：按 from/to 区间筛选，且 txs 按发生时间升序（早→晚）。"""
-        a = self._mk_acct("微信", "asset", 1000)
-        # 故意乱序写入：中间的日期先写
+    def _export(self, query=""):
+        """调用导出接口（默认模式：落盘 exports/ 并返回落盘信息）。"""
+        r = self.client.get(f"/api/assets/export{query}")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        return r.get_json()
+
+    def _exported_body(self, info):
+        """读回已导出的 JSON 文件内容。"""
+        p = Path(info["abs_path"])
+        self.assertTrue(p.exists(), f"导出文件应已落盘: {p}")
+        return json.loads(p.read_text(encoding="utf-8"))
+
+    def _seed_txs_out_of_order(self, account_id):
         for ts, note, amount in [
             ("2026-09-15T10:00:00+08:00", "b-中", 20),
             ("2026-09-01T09:00:00+08:00", "a-早", 10),
@@ -527,17 +537,27 @@ class AssetsApiTest(ApiTestCase):
             ("2026-09-30T23:30:00+08:00", "c-次晚", 30),
         ]:
             r = self.client.post("/api/transactions", json={
-                "type": "expense", "account_id": a["id"], "amount": amount,
+                "type": "expense", "account_id": account_id, "amount": amount,
                 "note": note, "ts": ts})
             self.assertEqual(r.status_code, 201, r.get_json())
 
-        # 指定区间：只含区间内，并按时间升序
-        r = self.client.get("/api/assets/export?from=2026-09-01&to=2026-09-30")
-        self.assertEqual(r.status_code, 200)
-        cd = r.headers.get("Content-Disposition", "")
-        self.assertIn("attachment", cd)
-        self.assertIn("assets-2026-09-01_2026-09-30-", unquote(cd))
-        body = json.loads(r.data.decode("utf-8"))
+    def test_export_assets_saves_to_exports_dir(self):
+        """默认导出到 exports/：按区间筛选、时间升序，且同名不覆盖。"""
+        a = self._mk_acct("微信", "asset", 1000)
+        self._seed_txs_out_of_order(a["id"])          # 故意乱序写入
+
+        info = self._export("?from=2026-09-01&to=2026-09-30")
+        self.assertTrue(info["ok"])
+        self.assertEqual(info["range"], {"from": "2026-09-01", "to": "2026-09-30"})
+        self.assertEqual(info["tx_count"], 3)
+        self.assertEqual(info["settled_day_count"], 0)
+        self.assertTrue(info["filename"].startswith("assets-2026-09-01_2026-09-30-"))
+        # 展示用相对路径（跨平台 / 分隔）与落盘目录
+        self.assertIn("exports/", info["rel_path"])
+        self.assertTrue(info["rel_path"].endswith(info["filename"]))
+        self.assertGreater(info["bytes"], 0)
+
+        body = self._exported_body(info)
         self.assertEqual(body["meta"]["range"], {"from": "2026-09-01", "to": "2026-09-30"})
         self.assertEqual(body["meta"]["amount_unit"], "fen")
         self.assertEqual(body["meta"]["tx_count"], 3)
@@ -546,32 +566,60 @@ class AssetsApiTest(ApiTestCase):
         self.assertEqual(body["accounts"][0]["balance_fen"], 100000 - (10 + 20 + 30 + 40) * 100)
         self.assertIn("asset_tags", body)
 
+        # 同一秒内再次导出 → 不覆盖，文件名加序号
+        again = self._export("?from=2026-09-01&to=2026-09-30")
+        self.assertNotEqual(again["filename"], info["filename"])
+        self.assertEqual(len(list(Path(info["dir"]).glob("*.json"))), 2)
+
         # 不传参数 = 全部，仍按时间升序
-        all_body = json.loads(self.client.get("/api/assets/export").data.decode("utf-8"))
-        self.assertEqual(all_body["meta"]["range"], {"from": None, "to": None})
-        self.assertEqual([t["note"] for t in all_body["txs"]], ["a-早", "b-中", "c-次晚", "d-晚"])
-        self.assertIn("assets-all-", unquote(
-            self.client.get("/api/assets/export").headers["Content-Disposition"]))
+        all_info = self._export()
+        self.assertEqual(all_info["range"], {"from": None, "to": None})
+        self.assertEqual(
+            [t["note"] for t in self._exported_body(all_info)["txs"]],
+            ["a-早", "b-中", "c-次晚", "d-晚"])
 
         # 只给一端（to）：含该日及之前
-        head = json.loads(self.client.get("/api/assets/export?to=2026-09-15").data.decode("utf-8"))
-        self.assertEqual([t["note"] for t in head["txs"]], ["a-早", "b-中"])
+        head = self._export("?to=2026-09-15")
+        self.assertEqual([t["note"] for t in self._exported_body(head)["txs"]], ["a-早", "b-中"])
+
+    def test_export_assets_download_mode(self):
+        """download=1：走附件下载（不落盘），文件名由后端给定。"""
+        a = self._mk_acct("微信", "asset", 1000)
+        self._seed_txs_out_of_order(a["id"])
+
+        before = self._export("?from=2026-09-01&to=2026-09-30")
+        out_dir = Path(before["dir"])
+        count_before = len(list(out_dir.glob("*.json")))
+        self.assertEqual(count_before, 1)
+
+        r = self.client.get("/api/assets/export?from=2026-09-01&to=2026-09-30&download=1")
+        self.assertEqual(r.status_code, 200)
+        cd = r.headers.get("Content-Disposition", "")
+        self.assertIn("attachment", cd)
+        self.assertIn("assets-2026-09-01_2026-09-30-", unquote(cd))
+        body = json.loads(r.data.decode("utf-8"))
+        self.assertEqual([t["note"] for t in body["txs"]], ["a-早", "b-中", "c-次晚"])
+        # 下载模式不额外落盘
+        self.assertEqual(len(list(out_dir.glob("*.json"))), count_before)
 
     def test_export_assets_settled_days_and_validation(self):
-        """导出：settled_days 同样按区间过滤；非法区间/格式返回 400。"""
+        """导出：settled_days 同样按区间过滤；非法区间/格式返回 400（且不落盘）。"""
         self.client.put("/api/asset-settlements", json={"day": "2026-09-10", "settled": True})
         self.client.put("/api/asset-settlements", json={"day": "2026-10-01", "settled": True})
 
-        r = self.client.get("/api/assets/export?from=2026-09-01&to=2026-09-30")
-        body = json.loads(r.data.decode("utf-8"))
-        self.assertEqual(body["settled_days"], ["2026-09-10"])
+        info = self._export("?from=2026-09-01&to=2026-09-30")
+        self.assertEqual(info["settled_day_count"], 1)
+        self.assertEqual(self._exported_body(info)["settled_days"], ["2026-09-10"])
         # 不限范围 → 全部已平账日期
-        all_body = json.loads(self.client.get("/api/assets/export").data.decode("utf-8"))
-        self.assertEqual(all_body["settled_days"], ["2026-09-10", "2026-10-01"])
+        all_info = self._export()
+        self.assertEqual(
+            self._exported_body(all_info)["settled_days"], ["2026-09-10", "2026-10-01"])
 
         self.assertEqual(self.client.get("/api/assets/export?from=2026/09/01").status_code, 400)
         self.assertEqual(
             self.client.get("/api/assets/export?from=2026-09-30&to=2026-09-01").status_code, 400)
+        # 两次合法导出 + 两次非法请求 → 目录里仍只有 2 个文件
+        self.assertEqual(len(list(Path(info["dir"]).glob("*.json"))), 2)
 
     def test_assets_are_global(self):
         """账户数据是个人级：切档案后仍存在。"""

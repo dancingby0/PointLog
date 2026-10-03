@@ -25,3 +25,6 @@ data/
 # 前端构建产物 + 依赖
 static/dist/
 frontend/node_modules/
+
+# 导出文件（个人数据，绝不入库）
+exports/

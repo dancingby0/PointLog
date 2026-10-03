@@ -5,10 +5,13 @@
 
 import datetime as dt
 import json
+import os
+from pathlib import Path
 from urllib.parse import quote
 
 from flask import Blueprint, Response, jsonify, request
 
+import config
 import data
 from utils import parse_ts
 
@@ -612,14 +615,47 @@ def _tx_ts_key(t: dict):
         return (float("-inf"), str(t.get("id") or ""))
 
 
+def _unique_export_path(directory: Path, filename: str) -> Path:
+    """导出文件名去重：同名已存在时追加 -2/-3…（避免同一秒内多次导出互相覆盖）。"""
+    path = directory / filename
+    if not path.exists():
+        return path
+    i = 2
+    while True:
+        cand = directory / f"{path.stem}-{i}{path.suffix}"
+        if not cand.exists():
+            return cand
+        i += 1
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    """原子写：先写 .tmp 再替换，避免中断留下半个文件。"""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
+
+
+def _rel_to_root(path: Path) -> str:
+    """相对项目根的展示路径（用 / 分隔，跨平台一致）。"""
+    root = Path(__file__).resolve().parent.parent
+    try:
+        return path.resolve().relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 @bp.get("/assets/export")
 def export_assets():
     """资产数据导出为 JSON 文件。
 
-    查询参数（都可省略；省略即不限）：
-      from / to   发生日期区间 YYYY-MM-DD（含端点，按本地自然日）
+    查询参数：
+      from / to   发生日期区间 YYYY-MM-DD（含端点，按本地自然日；可省略＝不限）
+      download    1/true/yes → 返回附件下载；默认（不传）→ 写入导出目录并返回落盘信息
 
-    返回内容与 assets.json 同构（asset_tags / accounts / txs / settled_days），
+    导出内容与 assets.json 同构（asset_tags / accounts / txs / settled_days），
     另附 meta（导出时间、范围、条数、金额单位）。其中：
     - txs 按发生时间**升序**（早→晚）排列，同一时刻按记录 id 升序；
     - settled_days 只导出区间内的日期（未指定范围则全部）。
@@ -679,10 +715,31 @@ def export_assets():
     else:
         span = f_iso or t_iso or "all"
     filename = f"assets-{span}-{now.strftime('%Y%m%d-%H%M%S')}.json"
-
     body = json.dumps(payload, ensure_ascii=False, indent=2)
-    resp = Response(body, mimetype="application/json")
-    # filename* 支持中文/特殊字符
-    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
-    return resp
+
+    # 显式要求下载时：直接以附件返回（不落盘）
+    if (request.args.get("download") or "").strip().lower() in ("1", "true", "yes"):
+        resp = Response(body, mimetype="application/json")
+        # filename* 支持中文/特殊字符
+        resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return resp
+
+    # 默认：写入导出目录 exports/，返回落盘信息（前端展示路径）
+    out_dir = Path(config.EXPORTS_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = _unique_export_path(out_dir, filename)
+    _write_text_atomic(target, body)
+
+    return jsonify({
+        "ok": True,
+        "filename": target.name,
+        "dir": str(out_dir),
+        "rel_path": _rel_to_root(target),
+        "abs_path": str(target),
+        "bytes": target.stat().st_size,
+        "range": {"from": f_iso, "to": t_iso},
+        "account_count": payload["meta"]["account_count"],
+        "tx_count": len(txs),
+        "settled_day_count": len(settled),
+    })
 

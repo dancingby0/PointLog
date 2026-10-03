@@ -940,12 +940,25 @@ export async function setDaySettled(day, settled) {
 }
 
 
-// ---- 导出（按发生日期区间，JSON 文件下载） ----
+// ---- 导出（按发生日期区间） ----
 // from / to 均为 YYYY-MM-DD（含端点），留空表示不限；导出内容中流水按时间升序。
+// 默认由后端写入 <项目根>/exports/，返回落盘信息 { filename, rel_path, tx_count, ... }
 export async function exportAssets(from = "", to = "") {
   const p = new URLSearchParams();
   if (from) p.set("from", from);
   if (to) p.set("to", to);
+  const res = await fetch(`/api/assets/export?${p.toString()}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "导出失败");
+  return data;
+}
+
+// 下载模式：以附件下载到浏览器（download=1，不在服务端落盘）；返回文件名
+export async function downloadAssets(from = "", to = "") {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  p.set("download", "1");
   const res = await fetch(`/api/assets/export?${p.toString()}`);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

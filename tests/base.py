@@ -38,6 +38,9 @@ class ApiTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self._old_dir = data.DATA_DIR
         data.DATA_DIR = Path(self._tmp.name)
+        self._old_exports_dir = config.EXPORTS_DIR
+        # 导出目录也隔离：测试不往真实 exports/ 落文件
+        config.EXPORTS_DIR = Path(self._tmp.name) / "exports"
         self._old_profile = config.CURRENT_PROFILE
         # 随机档案名：彻底避免跨测试共享任何档案状态
         self.profile = f"api_{uuid.uuid4().hex[:8]}"
@@ -45,6 +48,7 @@ class ApiTestCase(unittest.TestCase):
 
     def tearDown(self):
         data.DATA_DIR = self._old_dir
+        config.EXPORTS_DIR = self._old_exports_dir
         config.CURRENT_PROFILE = self._old_profile
         try:
             self._tmp.cleanup()
