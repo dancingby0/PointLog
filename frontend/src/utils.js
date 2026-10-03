@@ -54,6 +54,57 @@ export function formatDuration(min) {
   return `${h} 小时 ${m} 分`;
 }
 
+// "YYYY-MM-DDTHH:MM"（<input type=datetime-local> 的值）→ 本地 Date；空/非法 → null
+export function fromLocalInput(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s || "").trim());
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// 由"结束时间 + 用时（分钟）"回推开始时间（datetime-local 值；无法计算 → ""）
+export function startFromDuration(endLocal, minutes) {
+  const end = fromLocalInput(endLocal);
+  const min = Math.round(Number(minutes) || 0);
+  if (!end || min <= 0) return "";
+  return toLocalInput(new Date(end.getTime() - min * 60000));
+}
+
+// 两个 datetime-local 值之间的分钟数（缺失 / 结束不晚于开始 → null）
+export function minutesBetween(startLocal, endLocal) {
+  const s = fromLocalInput(startLocal);
+  const e = fromLocalInput(endLocal);
+  if (!s || !e || e <= s) return null;
+  return Math.round((e - s) / 60000);
+}
+
+// ---------- 打卡时段快捷（填用时 / 现在结束）的状态机（纯函数，便于测试） ----------
+
+// 填用时：结束（缺省＝现在）减去 minutes → 时段 + 锁定时长；minutes 非法 → null
+export function spanFromDuration(endLocal, minutes, now = new Date()) {
+  const min = Math.round(Number(minutes) || 0);
+  if (min <= 0) return null;
+  const end = fromLocalInput(endLocal) || now;
+  return {
+    start: toLocalInput(new Date(end.getTime() - min * 60000)),
+    end: toLocalInput(end),
+    lockMin: min,
+  };
+}
+
+// 结束＝现在：已锁定时长则按它回推开始；否则开始未填（或晚于此刻）时按 defaultMin 回推并锁定
+export function spanEndingNow(startLocal, lockMin, now = new Date(), defaultMin = 30) {
+  const end = toLocalInput(now);
+  if (lockMin) {
+    return { start: startFromDuration(end, lockMin), end, lockMin };
+  }
+  const start = fromLocalInput(startLocal);
+  if (!start || start >= now) {
+    return { start: startFromDuration(end, defaultMin), end, lockMin: defaultMin };
+  }
+  return { start: startLocal, end, lockMin: null };
+}
+
 // ---------- 贡献日历：把每日数组排成 GitHub 风格热力图网格（周一为每周起点） ----------
 export function buildContribGrid(days) {
   if (!days.length) return { weeks: [], months: [] };

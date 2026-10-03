@@ -1,6 +1,11 @@
 <script setup>
-import { state, submitEntry, endEdit } from "../store";
-import { toLocalInput } from "../utils";
+import { computed, ref } from "vue";
+import {
+  state, submitEntry, endEdit,
+  applyDuration, setEndNow, unlockDuration,
+  onSpanStartChanged, onSpanEndChanged,
+} from "../store";
+import { minutesBetween, formatDuration } from "../utils";
 import TagSelect from "./TagSelect.vue";
 
 async function onAddDiaryTag(tag) {
@@ -19,16 +24,23 @@ async function onAddDiaryTag(tag) {
   }
 }
 
-// 一键把时段"结束"设为此刻（适合做完立刻打卡）
-function endNow() {
-  state.form.end = toLocalInput(new Date());
+// 用时快捷（分钟）：点一下 ＝ 结束（缺省＝现在）减去该用时，自动填入开始时间
+const QUICK_MIN = [15, 30, 45, 60, 90, 120];
+const customMin = ref("");
+
+function applyCustomDuration() {
+  applyDuration(customMin.value);
 }
 
-// 清空时段（＝本条不选时间，只记录）
+// 清空时段（＝本条不选时间，只记录）并解除时长锁定
 function clearSpan() {
   state.form.start = "";
   state.form.end = "";
+  unlockDuration();
 }
+
+// 当前填出的用时（未填 / 结束不晚于开始 → null），用于实时提示
+const spanMinutes = computed(() => minutesBetween(state.form.start, state.form.end));
 </script>
 
 <template>
@@ -45,16 +57,33 @@ function clearSpan() {
     </label>
     <label class="label-block">时段（可选，默认不选：从 xx 起到 xx 结束）
       <div class="span-row">
-        <input v-model="state.form.start" type="datetime-local" aria-label="开始时间">
+        <input v-model="state.form.start" @change="onSpanStartChanged" type="datetime-local" aria-label="开始时间">
         <span class="muted">→</span>
-        <input v-model="state.form.end" type="datetime-local" aria-label="结束时间">
-        <button type="button" class="ghost tiny" @click="endNow" :disabled="!state.form.start">结束＝现在</button>
+        <input v-model="state.form.end" @change="onSpanEndChanged" type="datetime-local" aria-label="结束时间">
+        <button type="button" class="ghost tiny" @click="setEndNow"
+                title="结束设为此刻；开始未填（或晚于此刻）时按 30 分钟回推">⏱ 现在结束</button>
         <button type="button" class="ghost tiny" @click="clearSpan"
                 v-if="state.form.start || state.form.end">清空</button>
       </div>
     </label>
-    <p class="muted" style="margin:0 0 10px">
-      填了时段就会在记录里显示消耗时长；留空则只记录内容与点数。
+    <div class="span-quick">
+      <span class="muted">填用时：</span>
+      <button v-for="m in QUICK_MIN" :key="m" type="button" class="ghost tiny"
+              :class="{ on: state.form.lockMin === m }" @click="applyDuration(m)"
+              :title="`结束（缺省＝现在）减去 ${formatDuration(m)}，自动填入开始时间`">
+        {{ formatDuration(m) }}
+      </button>
+      <input class="dur-input" v-model.number="customMin" type="number" min="1" step="5"
+             placeholder="自定义" aria-label="自定义用时（分钟）"
+             @keydown.enter.prevent="applyCustomDuration">
+      <span class="muted">分钟</span>
+      <button type="button" class="ghost tiny" @click="applyCustomDuration">按此时长</button>
+      <button v-if="state.form.lockMin" type="button" class="ghost tiny" @click="unlockDuration"
+              title="解除后：开始 / 结束各自独立编辑">🔗 已锁定时长 {{ formatDuration(state.form.lockMin) }} · 解除</button>
+    </div>
+    <p class="muted span-hint">
+      <template v-if="spanMinutes != null">本时段用时 {{ formatDuration(spanMinutes) }}；</template>
+      填了时段就会在记录里显示消耗时长，留空＝只记录内容与点数。
       记录归属到 {{ state.selectedDay }}（凌晨 4 点前算昨日）。
     </p>
     <button type="submit">{{ state.editingId ? '保存修改' : '提交' }}</button>

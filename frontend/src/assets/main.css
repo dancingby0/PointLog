@@ -99,6 +99,12 @@ button:hover { filter: brightness(1.05); }
 /* ---- 打卡时段（起 → 止）输入行 ---- */
 .span-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .span-row input[type="datetime-local"] { width: auto; padding: 4px 8px; }
+/* ---- 打卡时段快捷：填用时 → 自动回推开始时间（可继续改结束时间） ---- */
+.span-quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -2px 0 0; }
+.span-quick .muted { font-size: 12px; }
+.span-quick button.on { color: var(--text); background: #e8f1ff; border-color: #b9d3ff; }
+.dur-input { display: inline-block; width: 74px; margin: 0; padding: 3px 8px; font-size: 12px; }
+.span-hint { margin: 6px 0 10px; font-size: 12px; }
 .entry .delete {
   background: transparent;
   color: var(--danger);

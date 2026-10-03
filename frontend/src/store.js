@@ -1,7 +1,7 @@
 // PointLog 全局 store：共享状态 + 业务动作
 // （原 app.js 的 data + methods 集中于此；组件通过具名导入使用）
 import { reactive } from "vue";
-import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel } from "./utils";
+import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel, startFromDuration, minutesBetween, spanFromDuration, spanEndingNow } from "./utils";
 
 export const state = reactive({
   entries: [],            // 当前所选天的记录
@@ -36,7 +36,7 @@ export const state = reactive({
   statsAssets: [],        // 统计：收支月度趋势
   assetStats: null,       // 资产统计分析（筛选+粒度+折线/饼图）
   editingId: null,        // 正在编辑的记录 id
-  form: { content: "", points: 1, category: "", start: "", end: "", ts: "" },
+  form: { content: "", points: 1, category: "", start: "", end: "", ts: "", lockMin: null },
   noteDraft: "",          // 感想草稿
   hasNote: false,         // 当天是否有感想
   noteEditing: false,     // 是否在编辑感想
@@ -624,6 +624,48 @@ export function stampNote() {
     : stamp;
 }
 
+// ---------- 打卡时段快捷（v2.4：填用时 → 自动回推开始时间） ----------
+
+// 填用时：结束（缺省＝现在）减去 minutes → 开始时间；并锁定该时长
+// 锁定后：改"结束"会按锁定分钟数自动同步"开始"（时长恒定）
+export function applyDuration(minutes) {
+  const span = spanFromDuration(state.form.end, minutes);
+  if (!span) {
+    alert("用时请填正整数分钟（例：30）");
+    return;
+  }
+  state.form.start = span.start;
+  state.form.end = span.end;
+  state.form.lockMin = span.lockMin;
+}
+
+// 结束＝现在：已锁定时长则按此时长回推开始；否则开始未填（或晚于此刻）时按 30 分钟回推
+export function setEndNow() {
+  const span = spanEndingNow(state.form.start, state.form.lockMin);
+  state.form.start = span.start;
+  state.form.end = span.end;
+  state.form.lockMin = span.lockMin;
+}
+
+// 解除时长锁定：之后开始 / 结束各自独立编辑
+export function unlockDuration() {
+  state.form.lockMin = null;
+}
+
+// 用户手动改"结束"：锁定时长不变 → 开始跟着走
+export function onSpanEndChanged() {
+  if (!state.form.lockMin) return;
+  const s = startFromDuration(state.form.end, state.form.lockMin);
+  if (s) state.form.start = s;
+}
+
+// 用户手动改"开始"：锁定状态下按新的差值更新锁定时长
+export function onSpanStartChanged() {
+  if (!state.form.lockMin) return;
+  const min = minutesBetween(state.form.start, state.form.end);
+  if (min) state.form.lockMin = min;
+}
+
 export async function submitEntry() {
   const payload = {
     content: state.form.content.trim(),
@@ -700,6 +742,7 @@ export function startEdit(entry) {
   state.form.start = entry.start_ts ? toLocalInput(new Date(entry.start_ts)) : "";
   state.form.end = entry.end_ts ? toLocalInput(new Date(entry.end_ts)) : "";
   state.form.ts = toLocalInput(new Date(entry.ts));
+  state.form.lockMin = null;      // 编辑既有记录时不锁定，时间可自由改
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -711,6 +754,7 @@ export function endEdit() {
   state.form.start = "";
   state.form.end = "";
   state.form.ts = "";          // 新增时留空 → 提交时按所选天取默认归属时刻
+  state.form.lockMin = null;   // 顺带解除时长锁定
 }
 
 export async function refresh() {
