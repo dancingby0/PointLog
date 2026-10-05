@@ -70,11 +70,11 @@ export function startFromDuration(endLocal, minutes) {
   return toLocalInput(new Date(end.getTime() - min * 60000));
 }
 
-// 两个 datetime-local 值之间的分钟数（缺失 / 结束不晚于开始 → null）
+// 两个 datetime-local 值之间的分钟数（缺失 / 结束早于开始 → null；同一时刻 → 0）
 export function minutesBetween(startLocal, endLocal) {
   const s = fromLocalInput(startLocal);
   const e = fromLocalInput(endLocal);
-  if (!s || !e || e <= s) return null;
+  if (!s || !e || e < s) return null;
   return Math.round((e - s) / 60000);
 }
 
@@ -103,6 +103,19 @@ export function spanEndingNow(startLocal, lockMin, now = new Date(), defaultMin 
     return { start: startFromDuration(end, defaultMin), end, lockMin: defaultMin };
   }
   return { start: startLocal, end, lockMin: null };
+}
+
+// 睡眠快捷：入睡日 baseDay（YYYY-MM-DD）+ 入睡 / 起床 HH:MM → 时段（datetime-local 值）。
+// 起床不晚于入睡 → 起床在次日（跨天）；同一时刻 → 0 时长（当天）。
+export function resolveSleepSpan(baseDay, fromHHMM, toHHMM) {
+  const start = `${baseDay}T${fromHHMM}`;
+  let end = `${baseDay}T${toHHMM}`;
+  if (toHHMM < fromHHMM) {
+    const d = fromDateStr(baseDay);
+    d.setDate(d.getDate() + 1);
+    end = `${toDateStr(d)}T${toHHMM}`;
+  }
+  return { start, end };
 }
 
 // ---------- 贡献日历：把每日数组排成 GitHub 风格热力图网格（周一为每周起点） ----------

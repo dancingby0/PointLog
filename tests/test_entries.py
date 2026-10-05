@@ -209,12 +209,24 @@ class EntriesApiTest(ApiTestCase):
         })
         self.assertEqual(r.status_code, 400)
 
-    def test_span_end_must_be_after_start(self):
-        now = dt.datetime.now().astimezone().isoformat()
+    def test_span_end_before_start_rejected(self):
+        """结束早于开始 → 400（同一时刻是合法的 0 时长）。"""
+        now = dt.datetime.now().astimezone()
         r = self.client.post("/api/entries", json={
-            "content": "同一时刻", "points": 1, "start_ts": now, "end_ts": now,
+            "content": "结束更早", "points": 1,
+            "start_ts": now.isoformat(),
+            "end_ts": (now - dt.timedelta(minutes=1)).isoformat(),
         })
         self.assertEqual(r.status_code, 400)
+
+    def test_span_zero_duration(self):
+        """起止同一时刻 → 合法，duration_min = 0（只记时间点、不计时长）。"""
+        now = dt.datetime.now().astimezone().isoformat()
+        r = self.client.post("/api/entries", json={
+            "content": "只记时间点", "points": 1, "start_ts": now, "end_ts": now,
+        })
+        self.assertEqual(r.status_code, 201, r.get_json())
+        self.assertEqual(r.get_json()["duration_min"], 0)
 
     def test_span_bad_format(self):
         r = self.client.post("/api/entries", json={
@@ -248,6 +260,16 @@ class EntriesApiTest(ApiTestCase):
         # 只清一端 → 400
         r = self.client.put(f"/api/entries/{eid}", json={"start_ts": start.isoformat()})
         self.assertEqual(r.status_code, 400)
+
+    def test_update_to_zero_duration(self):
+        """编辑：把已有时段改成 0 时长（起止同一时刻）。"""
+        r = self.client.post("/api/entries", json={"content": "写作业", "points": 2})
+        eid = r.get_json()["id"]
+        now = dt.datetime.now().astimezone().isoformat()
+        r = self.client.put(f"/api/entries/{eid}", json={
+            "start_ts": now, "end_ts": now})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertEqual(r.get_json()["duration_min"], 0)
 
 
 if __name__ == "__main__":

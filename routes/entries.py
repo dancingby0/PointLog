@@ -32,7 +32,8 @@ def _clean_span_value(value):
 def _resolve_span(body: dict, current: dict | None = None):
     """解析并校验 start_ts / end_ts（支持局部更新；缺省沿用 current）。
 
-    规则：两端要么都填、要么都留空；都填时结束必须晚于开始。
+    规则：两端要么都填、要么都留空；都填时结束不能早于开始
+    （起止同一时刻是合法的 0 时长——只记时间点、不计时长）。
     """
     current = current or {}
     if "start_ts" in body:
@@ -45,8 +46,8 @@ def _resolve_span(body: dict, current: dict | None = None):
         end = _clean_span_value(current.get("end_ts"))
     if (start is None) != (end is None):
         raise ValueError("开始与结束时间要同时填写，或都留空")
-    if start and end and parse_ts(end) <= parse_ts(start):
-        raise ValueError("结束时间要晚于开始时间")
+    if start and end and parse_ts(end) < parse_ts(start):
+        raise ValueError("结束时间不能早于开始时间")
     return start, end
 
 

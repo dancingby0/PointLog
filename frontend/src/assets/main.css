@@ -105,6 +105,9 @@ button:hover { filter: brightness(1.05); }
 .span-quick button.on { color: var(--text); background: #e8f1ff; border-color: #b9d3ff; }
 .dur-input { display: inline-block; width: 74px; margin: 0; padding: 3px 8px; font-size: 12px; }
 .span-hint { margin: 6px 0 10px; font-size: 12px; }
+.sleep-quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
+.sleep-quick .muted { font-size: 12px; }
+.sleep-quick input[type="time"], .sleep-quick select { width: auto; padding: 3px 6px; font-size: 13px; margin: 0; }
 .entry .delete {
   background: transparent;
   color: var(--danger);

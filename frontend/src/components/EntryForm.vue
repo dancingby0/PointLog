@@ -1,11 +1,11 @@
 <script setup>
 import { computed, ref } from "vue";
 import {
-  state, submitEntry, endEdit,
+  state, submitEntry, endEdit, submitSleep,
   applyDuration, setEndNow, unlockDuration,
   onSpanStartChanged, onSpanEndChanged,
 } from "../store";
-import { minutesBetween, formatDuration } from "../utils";
+import { minutesBetween, formatDuration, toLocalInput } from "../utils";
 import TagSelect from "./TagSelect.vue";
 
 async function onAddDiaryTag(tag) {
@@ -39,8 +39,30 @@ function clearSpan() {
   unlockDuration();
 }
 
-// 当前填出的用时（未填 / 结束不晚于开始 → null），用于实时提示
+// 当前填出的用时（未填 / 结束早于开始 → null；同一时刻 → 0），用于实时提示
 const spanMinutes = computed(() => minutesBetween(state.form.start, state.form.end));
+
+// ---- 睡眠快捷记录（入睡 / 起床，起床不晚于入睡时自动跨到次日） ----
+const sleepFrom = ref("23:00");
+const sleepTo = ref("07:00");
+const sleepBase = ref("yesterday");   // 入睡日基准：昨天（早上补记昨晚） / 今天（午睡等）
+
+async function onSleepSubmit() {
+  if (!sleepFrom.value || !sleepTo.value) {
+    alert("请填写入睡与起床时间");
+    return;
+  }
+  if (!state.diaryTags.includes("睡眠")) await onAddDiaryTag("睡眠");
+  await submitSleep(sleepFrom.value, sleepTo.value, sleepBase.value);
+}
+
+// 只记此刻：起止＝现在（0 时长，只记时间点、不计时长）
+function pointNow() {
+  const now = toLocalInput(new Date());
+  state.form.start = now;
+  state.form.end = now;
+  state.form.lockMin = null;
+}
 </script>
 
 <template>
@@ -78,13 +100,32 @@ const spanMinutes = computed(() => minutesBetween(state.form.start, state.form.e
              @keydown.enter.prevent="applyCustomDuration">
       <span class="muted">分钟</span>
       <button type="button" class="ghost tiny" @click="applyCustomDuration">按此时长</button>
+      <button type="button" class="ghost tiny" @click="pointNow"
+              title="起止都设为此刻：0 时长，只记时间点、不计时长">📍 只记此刻</button>
       <button v-if="state.form.lockMin" type="button" class="ghost tiny" @click="unlockDuration"
               title="解除后：开始 / 结束各自独立编辑">🔗 已锁定时长 {{ formatDuration(state.form.lockMin) }} · 解除</button>
     </div>
+    <div class="sleep-quick">
+      <span class="muted">🌙 记睡眠：</span>
+      <input v-model="sleepFrom" type="time" aria-label="入睡时间">
+      <span class="muted">→</span>
+      <input v-model="sleepTo" type="time" aria-label="起床时间">
+      <select v-model="sleepBase" aria-label="入睡日期基准">
+        <option value="yesterday">昨晚</option>
+        <option value="today">今天</option>
+      </select>
+      <button type="button" class="ghost tiny" @click="onSleepSubmit">记一条</button>
+      <span class="muted">（起床早于入睡时自动跨到次日）</span>
+    </div>
+    <label class="label-block">归属时刻（可选；决定记到哪一天）
+      <input v-model="state.form.ts" type="datetime-local">
+    </label>
     <p class="muted span-hint">
-      <template v-if="spanMinutes != null">本时段用时 {{ formatDuration(spanMinutes) }}；</template>
-      填了时段就会在记录里显示消耗时长，留空＝只记录内容与点数。
-      记录归属到 {{ state.selectedDay }}（凌晨 4 点前算昨日）。
+      <template v-if="spanMinutes != null">
+        {{ spanMinutes === 0 ? '0 时长：只记时间点、不计时长；' : `本时段用时 ${formatDuration(spanMinutes)}；` }}
+      </template>
+      填了时段就会在记录里显示消耗时长（留空＝只记录内容与点数）。
+      归属时刻留空＝自动（填了时段取时段开始，否则＝现在）。
     </p>
     <button type="submit">{{ state.editingId ? '保存修改' : '提交' }}</button>
     <button type="button" class="ghost" v-if="state.editingId" @click="endEdit">取消编辑</button>

@@ -1,7 +1,7 @@
 // PointLog 全局 store：共享状态 + 业务动作
 // （原 app.js 的 data + methods 集中于此；组件通过具名导入使用）
 import { reactive } from "vue";
-import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel, startFromDuration, minutesBetween, spanFromDuration, spanEndingNow } from "./utils";
+import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel, startFromDuration, minutesBetween, spanFromDuration, spanEndingNow, resolveSleepSpan } from "./utils";
 
 export const state = reactive({
   entries: [],            // 当前所选天的记录
@@ -678,9 +678,11 @@ export async function submitEntry() {
     return;
   }
 
-  // 归属时刻（内部用，决定属于哪一天）：不选时间时按当前所选天
-  // 今天＝现在；查看历史某天＝当天 12:00
-  const tsInput = state.form.ts || defaultTsFor(state.selectedDay);
+  // 归属时刻（内部用，决定属于哪一天）：
+  // 留空 → 自动：填了时段取时段开始；否则＝现在（今天）/ 当天 12:00（历史）
+  const startInput = state.form.start;
+  const endInput = state.form.end;
+  const tsInput = state.form.ts || (startInput ? startInput : defaultTsFor(state.selectedDay));
   const ownerTs = new Date(tsInput);
   if (Number.isNaN(ownerTs.getTime())) {
     alert("时间格式不正确");
@@ -688,9 +690,8 @@ export async function submitEntry() {
   }
   payload.ts = ownerTs.toISOString();
 
-  // 可选时段：起、止要么都填、要么都留空；填了就等于记录"从 xx 起到 xx 结束"
-  const startInput = state.form.start;
-  const endInput = state.form.end;
+  // 可选时段：起、止要么都填、要么都留空；填了就等于记录"从 xx 起到 xx 结束"。
+  // 起止同一时刻是合法的 0 时长——只记时间点、不计时长。
   if ((startInput && !endInput) || (!startInput && endInput)) {
     alert("开始与结束时间要同时填写，或都留空");
     return;
@@ -702,8 +703,8 @@ export async function submitEntry() {
       alert("时间格式不正确");
       return;
     }
-    if (de <= ds) {
-      alert("结束时间要晚于开始时间");
+    if (de < ds) {
+      alert("结束时间不能早于开始时间（0 时长＝只记时间点）");
       return;
     }
     payload.start_ts = ds.toISOString();
@@ -732,6 +733,24 @@ export async function submitEntry() {
   } catch (err) {
     alert("提交失败：" + err.message);
   }
+}
+
+// 睡眠快捷记录：入睡 / 起床（HH:MM）+ 归属基准（"today"＝所选天，"yesterday"＝前一天）。
+// 起床不晚于入睡时自动跨到次日；生成一条类别"睡眠"、0 点数、有时段的记录（归属＝入睡时刻）。
+export async function submitSleep(fromTime, toTime, base) {
+  const baseDay = state.selectedDay;
+  const prevDay = fromDateStr(state.selectedDay);
+  prevDay.setDate(prevDay.getDate() - 1);
+  const day = base === "today" ? baseDay : toDateStr(prevDay);
+  const span = resolveSleepSpan(day, fromTime, toTime);
+  state.form.content = "睡眠";
+  state.form.points = 0;
+  state.form.category = "睡眠";
+  state.form.start = span.start;
+  state.form.end = span.end;
+  state.form.ts = "";             // 留空 → 自动取时段开始（入睡时刻）
+  state.form.lockMin = null;
+  await submitEntry();
 }
 
 export function startEdit(entry) {

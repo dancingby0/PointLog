@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { state, selectedLabel, startEdit, delEntry } from "../store";
-import { formatTime, formatClock, formatDuration } from "../utils";
+import { formatTime, formatClock, formatDuration, toDateStr } from "../utils";
 
 const sortedEntries = computed(() =>
   [...state.entries].sort((a, b) => {
@@ -16,11 +16,18 @@ const sortedEntries = computed(() =>
 const totalDuration = computed(() =>
   state.entries.reduce((sum, e) => sum + (e.duration_min || 0), 0)
 );
-const hasDuration = computed(() => state.entries.some((e) => e.duration_min != null));
+const hasDuration = computed(() => state.entries.some((e) => (e.duration_min || 0) > 0));
 
-// 时段文本：09:00–10:30；未选时间则退回显示记录时刻
+// 时段文本：09:00–10:30；跨天（如睡眠）标"次日"；0 时长只显示一个时刻；
+// 未选时间则退回显示记录时刻
 function timeText(e) {
-  if (e.start_ts && e.end_ts) return `${formatClock(e.start_ts)}–${formatClock(e.end_ts)}`;
+  if (e.start_ts && e.end_ts) {
+    const s = new Date(e.start_ts);
+    const t = new Date(e.end_ts);
+    if (s.getTime() === t.getTime()) return formatClock(e.start_ts);
+    const cross = toDateStr(s) !== toDateStr(t);
+    return `${formatClock(e.start_ts)}${cross ? "–次日" : "–"}${formatClock(e.end_ts)}`;
+  }
   return formatTime(e.ts);
 }
 </script>
@@ -39,7 +46,7 @@ function timeText(e) {
         </span>
         <span class="entry-content">{{ e.content }}</span>
         <span v-if="e.category" class="entry-cat">{{ e.category }}</span>
-        <span v-if="e.duration_min != null" class="entry-duration">用时 {{ formatDuration(e.duration_min) }}</span>
+        <span v-if="e.duration_min > 0" class="entry-duration">用时 {{ formatDuration(e.duration_min) }}</span>
         <span class="entry-points">{{ e.points > 0 ? '+' + e.points : '0 点' }}</span>
         <button class="edit" @click="startEdit(e)">编辑</button>
         <button class="delete" @click="delEntry(e)">×</button>
