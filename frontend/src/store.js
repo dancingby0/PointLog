@@ -762,7 +762,6 @@ export function startEdit(entry) {
   state.form.end = entry.end_ts ? toLocalInput(new Date(entry.end_ts)) : "";
   state.form.ts = toLocalInput(new Date(entry.ts));
   state.form.lockMin = null;      // 编辑既有记录时不锁定，时间可自由改
-  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 export function endEdit() {
