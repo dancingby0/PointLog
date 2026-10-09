@@ -118,6 +118,24 @@ export function resolveSleepSpan(baseDay, fromHHMM, toHHMM) {
   return { start, end };
 }
 
+// 睡眠默认归属基准（"auto" 时用）：起床早于入睡（跨零点）→ 入睡在"昨晚"；
+// 否则整段睡眠落在同一天 → "今天"。纯由时段推出，与"现在几点"无关。
+export function sleepBaseFor(fromHHMM, toHHMM) {
+  return String(toHHMM) < String(fromHHMM) ? "yesterday" : "today";
+}
+
+// 睡眠记录的归属时刻：睡眠按"入睡的日历日"归属，**不走凌晨 4 点回退**
+// （4 点规则是给熬夜工作用的，睡眠跨越零点属正常）。
+// 入睡在本地 12:00 之前时，把归属时刻锚到当天 12:00：
+// ① 前端 dayOf() 与后端 date_of()（对 UTC 串做 4 小时减法）都能得到入睡那一天；
+// ② 时间点仍以 start_ts / end_ts 为准，界面显示不受影响。
+export function sleepOwnerTs(startLocal) {
+  const d = fromLocalInput(startLocal);
+  if (!d) return "";
+  const noon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
+  return toLocalInput(d < noon ? noon : d);
+}
+
 // ---------- 贡献日历：把每日数组排成 GitHub 风格热力图网格（周一为每周起点） ----------
 export function buildContribGrid(days) {
   if (!days.length) return { weeks: [], months: [] };

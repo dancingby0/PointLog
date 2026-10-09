@@ -1,7 +1,7 @@
 // PointLog 全局 store：共享状态 + 业务动作
 // （原 app.js 的 data + methods 集中于此；组件通过具名导入使用）
 import { reactive } from "vue";
-import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel, startFromDuration, minutesBetween, spanFromDuration, spanEndingNow, resolveSleepSpan } from "./utils";
+import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel, startFromDuration, minutesBetween, spanFromDuration, spanEndingNow, resolveSleepSpan, sleepBaseFor, sleepOwnerTs } from "./utils";
 
 export const state = reactive({
   entries: [],            // 当前所选天的记录
@@ -735,20 +735,22 @@ export async function submitEntry() {
   }
 }
 
-// 睡眠快捷记录：入睡 / 起床（HH:MM）+ 归属基准（"today"＝所选天，"yesterday"＝前一天）。
-// 起床不晚于入睡时自动跨到次日；生成一条类别"睡眠"、0 点数、有时段的记录（归属＝入睡时刻）。
+// 睡眠快捷记录：入睡 / 起床（HH:MM）+ 归属基准（"auto"＝按跨零点自动 / "today"＝所选天 / "yesterday"＝前一天）。
+// 起床不晚于入睡时自动跨到次日；生成一条类别"睡眠"、0 点数、有时段的记录。
+// 归属＝**入睡的日历日**（不走凌晨 4 点回退，否则 03:10 入睡会被甩到前一天）。
 export async function submitSleep(fromTime, toTime, base) {
   const baseDay = state.selectedDay;
+  const resolved = base === "auto" ? sleepBaseFor(fromTime, toTime) : base;
   const prevDay = fromDateStr(state.selectedDay);
   prevDay.setDate(prevDay.getDate() - 1);
-  const day = base === "today" ? baseDay : toDateStr(prevDay);
+  const day = resolved === "today" ? baseDay : toDateStr(prevDay);
   const span = resolveSleepSpan(day, fromTime, toTime);
   state.form.content = "睡眠";
   state.form.points = 0;
   state.form.category = "睡眠";
   state.form.start = span.start;
   state.form.end = span.end;
-  state.form.ts = "";             // 留空 → 自动取时段开始（入睡时刻）
+  state.form.ts = sleepOwnerTs(span.start);   // 归属＝入睡日历日（入睡在 12:00 前则锚到当天 12:00）
   state.form.lockMin = null;
   await submitEntry();
 }

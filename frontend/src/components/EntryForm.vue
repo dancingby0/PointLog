@@ -45,7 +45,7 @@ const spanMinutes = computed(() => minutesBetween(state.form.start, state.form.e
 // ---- 睡眠快捷记录（入睡 / 起床，起床不晚于入睡时自动跨到次日） ----
 const sleepFrom = ref("23:00");
 const sleepTo = ref("07:00");
-const sleepBase = ref("yesterday");   // 入睡日基准：昨天（早上补记昨晚） / 今天（午睡等）
+const sleepBase = ref("auto");   // 入睡日基准：自动（跨零点→昨晚；否则→今天） / 昨晚 / 今天
 
 async function onSleepSubmit() {
   if (!sleepFrom.value || !sleepTo.value) {
@@ -111,11 +111,12 @@ function pointNow() {
       <span class="muted">→</span>
       <input v-model="sleepTo" type="time" aria-label="起床时间">
       <select v-model="sleepBase" aria-label="入睡日期基准">
+        <option value="auto">自动</option>
         <option value="yesterday">昨晚</option>
         <option value="today">今天</option>
       </select>
       <button type="button" class="ghost tiny" @click="onSleepSubmit">记一条</button>
-      <span class="muted">（起床早于入睡时自动跨到次日）</span>
+      <span class="muted">（起床早于入睡时自动跨到次日；归属到入睡那天）</span>
     </div>
     <label class="label-block">归属时刻（可选；决定记到哪一天）
       <input v-model="state.form.ts" type="datetime-local">
