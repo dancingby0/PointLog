@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { state, selectedLabel, startEdit, delEntry } from "../store";
-import { formatTime, formatClock, formatDuration, toDateStr } from "../utils";
+import { formatTime, formatClock, formatDuration, toDateStr, toCategoryList } from "../utils";
 
 const sortedEntries = computed(() =>
   [...state.entries].sort((a, b) => {
@@ -45,7 +45,7 @@ function timeText(e) {
           {{ timeText(e) }}
         </span>
         <span class="entry-content">{{ e.content }}</span>
-        <span v-if="e.category" class="entry-cat">{{ e.category }}</span>
+        <span v-for="c in toCategoryList(e.category)" :key="c" class="entry-cat">{{ c }}</span>
         <span v-if="e.duration_min > 0" class="entry-duration">用时 {{ formatDuration(e.duration_min) }}</span>
         <span class="entry-points">{{ e.points > 0 ? '+' + e.points : '0 点' }}</span>
         <button class="edit" @click="startEdit(e)">编辑</button>

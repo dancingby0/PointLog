@@ -6,7 +6,7 @@ import {
   onSpanStartChanged, onSpanEndChanged,
 } from "../store";
 import { minutesBetween, formatDuration, toLocalInput } from "../utils";
-import TagSelect from "./TagSelect.vue";
+import TagMultiSelect from "./TagMultiSelect.vue";
 
 async function onAddDiaryTag(tag) {
   try {
@@ -74,8 +74,9 @@ function pointNow() {
     <label>点数（0＝只记录，不做激励）
       <input v-model.number="state.form.points" type="number" min="0" step="1" placeholder="1">
     </label>
-    <label class="label-block">类别（可选）
-      <TagSelect :tags="state.diaryTags" v-model="state.form.category" @add-tag="onAddDiaryTag" />
+    <label class="label-block">类别（可选，可多选：再点一下取消；自定义可加入类别池）
+      <TagMultiSelect :tags="state.diaryTags" v-model="state.form.category"
+                      label="类别" @add-tag="onAddDiaryTag" />
     </label>
     <label class="label-block">时段（可选，默认不选：从 xx 起到 xx 结束）
       <div class="span-row">

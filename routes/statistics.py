@@ -11,7 +11,7 @@ from flask import Blueprint, jsonify, request
 import config
 import data
 import stats
-from utils import date_of, day_points_of, parse_ts
+from utils import clean_categories, date_of, day_points_of, parse_ts
 
 bp = Blueprint("statistics", __name__, url_prefix="/api/stats")
 
@@ -223,9 +223,17 @@ def _period_label(hour: int) -> str:
 WEEKDAY_ORDER = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
 
+def _round_points(value: float):
+    """均摊后的点数：整数值还原为 int（输出更干净），否则保留 2 位小数。"""
+    return int(value) if float(value).is_integer() else round(value, 2)
+
+
 @bp.get("/distribution")
 def distribution():
-    """结构与规律分布：标签占比 / 星期分布 / 时段分布。
+    """结构与规律分布：类别占比 / 星期分布 / 时段分布。
+
+    类别支持多选：一条记录命中多个类别时，其点数在这些类别间**均摊**，
+    保证"类别维度合计 = 期间总点数"（与资产标签占比同一约定）。
 
     GET /api/stats/distribution?range=week|month|year|all
     """
@@ -262,15 +270,18 @@ def distribution():
         wd = WEEKDAY_ORDER[day.weekday()]
         weekday_points[wd] = weekday_points.get(wd, 0) + pts
 
-        # 类别标签（v1 category 可能是文本）
-        cat = str(e.get("category") or "").strip()
-        if cat:
-            tag_points.setdefault(cat, {"points": 0, "count": 0})
-            tag_points[cat]["points"] += pts
-            tag_points[cat]["count"] += 1
+        # 类别（可多选）：一条记录命中多个类别时，点数在这些类别间均摊
+        cats = clean_categories(e.get("category"))
+        if cats:
+            share = pts / len(cats)
+            for cat in cats:
+                item = tag_points.setdefault(cat, {"points": 0.0, "count": 0})
+                item["points"] += share
+                item["count"] += 1
 
-    tags = [{"tag": k, **v} for k, v in sorted(tag_points.items(),
-                                               key=lambda kv: kv[1]["points"], reverse=True)]
+    tags = [{"tag": k, "points": _round_points(v["points"]), "count": v["count"]}
+            for k, v in sorted(tag_points.items(),
+                               key=lambda kv: kv[1]["points"], reverse=True)]
     weekdays = [{"label": w, "points": weekday_points.get(w, 0)} for w in WEEKDAY_ORDER]
     periods = [{"label": l, "points": period_points.get(l, 0)}
                for l, _ in PERIOD_BUCKETS]

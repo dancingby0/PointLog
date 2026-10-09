@@ -5,17 +5,21 @@ import unittest
 from pathlib import Path
 from urllib.parse import unquote
 
+import config
+import data
 from base import ApiTestCase
 
 
 class EntriesExportApiTest(ApiTestCase):
     """打卡导出：按归属日区间筛选、时间升序、落盘/下载、参数校验。"""
 
-    def _add(self, ts, content, points=1, start=None, end=None):
+    def _add(self, ts, content, points=1, start=None, end=None, category=None):
         body = {"content": content, "points": points, "ts": ts}
         if start and end:
             body["start_ts"] = start
             body["end_ts"] = end
+        if category is not None:
+            body["category"] = category
         r = self.client.post("/api/entries", json=body)
         self.assertEqual(r.status_code, 201, r.get_json())
         return r.get_json()
@@ -106,6 +110,19 @@ class EntriesExportApiTest(ApiTestCase):
         self.assertEqual([e["content"] for e in body["entries"]], ["a-早", "b-中", "c-次晚"])
         # 下载模式不额外落盘
         self.assertEqual(len(list(out_dir.glob("*.json"))), count_before)
+
+    def test_export_entries_category_is_list(self):
+        """导出 category 恒为字符串数组（可多选）；老数据的单值写法读时规范化。"""
+        self._add("2026-09-10T13:00:00+08:00", "多类别", 2, category=["学习", "数学"])
+        d = data.load(config.CURRENT_PROFILE)
+        d["entries"].append({"id": "legacy", "ts": "2026-09-10T12:00:00+08:00",
+                             "points": 1, "content": "老记录", "category": "洗衣服"})
+        data.save(config.CURRENT_PROFILE, d)
+
+        body = self._exported_body(self._export("?from=2026-09-10&to=2026-09-10"))
+        by_content = {e["content"]: e for e in body["entries"]}
+        self.assertEqual(by_content["多类别"]["category"], ["学习", "数学"])
+        self.assertEqual(by_content["老记录"]["category"], ["洗衣服"])
 
     def test_export_entries_validation(self):
         """非法区间/格式返回 400，且不产生任何文件。"""

@@ -136,6 +136,18 @@ export function sleepOwnerTs(startLocal) {
   return toLocalInput(d < noon ? noon : d);
 }
 
+// 类别（可多选）：把接口返回 / 表单里的各种写法规范化为字符串数组。
+// 老数据是单值字符串（"学习"）或 null（无类别），统一成 ["学习"] / []。
+export function toCategoryList(raw) {
+  const items = Array.isArray(raw) ? raw : raw == null || raw === "" ? [] : [raw];
+  const out = [];
+  for (const item of items) {
+    const text = String(item ?? "").trim();
+    if (text && !out.includes(text)) out.push(text);
+  }
+  return out;
+}
+
 // ---------- 贡献日历：把每日数组排成 GitHub 风格热力图网格（周一为每周起点） ----------
 export function buildContribGrid(days) {
   if (!days.length) return { weeks: [], months: [] };

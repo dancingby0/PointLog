@@ -6,6 +6,9 @@
 - `start_ts` / `end_ts` 是**可选的时段**（从 xx 起到 xx 结束）：两端要么都填、要么都留空，
   都填时按 `end - start` 派生 `duration_min`（消耗时长，分钟）；
 - 留空 = 本条不记时长（仍按点数计入当天）；点数允许 0（单纯记录、不做激励）。
+
+类别（v2.5）：`category` 为**字符串数组**（可多选，空数组＝无类别）。
+老数据里的单值写法（`"category": "学习"` / `null`）读时自动规范化为数组，无需迁移。
 """
 
 import datetime as dt
@@ -16,7 +19,7 @@ from flask import Blueprint, jsonify, request
 import config
 import data
 import export_io
-from utils import date_of, day_bounds, parse_ts
+from utils import clean_categories, date_of, day_bounds, parse_ts
 
 bp = Blueprint("entries", __name__, url_prefix="/api")
 
@@ -63,13 +66,17 @@ def _duration_min(start, end):
 
 
 def _serialize(e: dict) -> dict:
-    """输出给前端的记录：补全可选时段字段并派生消耗时长。"""
+    """输出给前端的记录：补全可选时段字段并派生消耗时长。
+
+    `category` 统一输出为字符串数组（多选），老数据的单值写法在此规范化。
+    """
     out = dict(e)
     start = e.get("start_ts")
     end = e.get("end_ts")
     out["start_ts"] = start
     out["end_ts"] = end
     out["duration_min"] = _duration_min(start, end)
+    out["category"] = clean_categories(e.get("category"))
     return out
 
 
@@ -145,7 +152,7 @@ def create_entry():
         "end_ts": end_ts,
         "points": points,
         "content": content,
-        "category": (str(body.get("category") or "")).strip() or None,
+        "category": clean_categories(body.get("category")),
     }
     d = data.load(config.CURRENT_PROFILE)
     d["entries"].append(entry)
@@ -189,7 +196,7 @@ def update_entry(entry_id: str):
         entry["points"] = points
 
     if "category" in body:
-        entry["category"] = str(body.get("category") or "").strip() or None
+        entry["category"] = clean_categories(body.get("category"))
 
     if "ts" in body:
         try:
@@ -221,7 +228,8 @@ def export_entries():
 
     导出内容：`meta`（导出时间、档案、区间、条数、天数、总点数、总时长）+ `entries`。
     entries 按归属日、再按记录时刻**升序**（早→晚）；每条含
-    `day` / `ts` / `start_ts` / `end_ts` / `duration_min` / `points` / `content` / `category`。
+    `day` / `ts` / `start_ts` / `end_ts` / `duration_min` / `points` / `content` / `category`
+    （`category` 为字符串数组，可多选，空数组＝无类别）。
     """
     date_from = (request.args.get("from") or "").strip()
     date_to = (request.args.get("to") or "").strip()

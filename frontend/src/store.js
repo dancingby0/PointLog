@@ -1,7 +1,7 @@
 // PointLog 全局 store：共享状态 + 业务动作
 // （原 app.js 的 data + methods 集中于此；组件通过具名导入使用）
 import { reactive } from "vue";
-import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel, startFromDuration, minutesBetween, spanFromDuration, spanEndingNow, resolveSleepSpan, sleepBaseFor, sleepOwnerTs } from "./utils";
+import { toLocalInput, toDateStr, fromDateStr, dayOf, weekdayLabel, startFromDuration, minutesBetween, spanFromDuration, spanEndingNow, resolveSleepSpan, sleepBaseFor, sleepOwnerTs, toCategoryList } from "./utils";
 
 export const state = reactive({
   entries: [],            // 当前所选天的记录
@@ -36,7 +36,7 @@ export const state = reactive({
   statsAssets: [],        // 统计：收支月度趋势
   assetStats: null,       // 资产统计分析（筛选+粒度+折线/饼图）
   editingId: null,        // 正在编辑的记录 id
-  form: { content: "", points: 1, category: "", start: "", end: "", ts: "", lockMin: null },
+  form: { content: "", points: 1, category: [], start: "", end: "", ts: "", lockMin: null },
   noteDraft: "",          // 感想草稿
   hasNote: false,         // 当天是否有感想
   noteEditing: false,     // 是否在编辑感想
@@ -289,7 +289,7 @@ export function resetForProfileChange() {
   state.calendarDays = [];
   state.calendarYear = 0;
   state.editingId = null;
-  state.form = { content: "", points: 1, category: "", ts: "" };
+  state.form = { content: "", points: 1, category: [], ts: "" };
   state.noteDraft = "";
   state.hasNote = false;
   state.noteEditing = false;
@@ -670,7 +670,7 @@ export async function submitEntry() {
   const payload = {
     content: state.form.content.trim(),
     points: Number(state.form.points),
-    category: state.form.category || null,
+    category: toCategoryList(state.form.category),
   };
   if (!payload.content) return;
   if (!Number.isInteger(payload.points) || payload.points < 0) {
@@ -747,7 +747,7 @@ export async function submitSleep(fromTime, toTime, base) {
   const span = resolveSleepSpan(day, fromTime, toTime);
   state.form.content = "睡眠";
   state.form.points = 0;
-  state.form.category = "睡眠";
+  state.form.category = ["睡眠"];
   state.form.start = span.start;
   state.form.end = span.end;
   state.form.ts = sleepOwnerTs(span.start);   // 归属＝入睡日历日（入睡在 12:00 前则锚到当天 12:00）
@@ -759,7 +759,7 @@ export function startEdit(entry) {
   state.editingId = entry.id;
   state.form.content = entry.content;
   state.form.points = entry.points;
-  state.form.category = entry.category || "";
+  state.form.category = toCategoryList(entry.category);
   state.form.start = entry.start_ts ? toLocalInput(new Date(entry.start_ts)) : "";
   state.form.end = entry.end_ts ? toLocalInput(new Date(entry.end_ts)) : "";
   state.form.ts = toLocalInput(new Date(entry.ts));
@@ -770,7 +770,7 @@ export function endEdit() {
   state.editingId = null;
   state.form.content = "";
   state.form.points = 1;
-  state.form.category = "";
+  state.form.category = [];
   state.form.start = "";
   state.form.end = "";
   state.form.ts = "";          // 新增时留空 → 提交时按所选天取默认归属时刻

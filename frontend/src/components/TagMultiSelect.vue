@@ -5,6 +5,7 @@ import { computed, ref } from "vue";
 const props = defineProps({
   tags: { type: Array, default: () => [] },        // 标签池
   modelValue: { type: Array, default: () => [] },  // 已选标签数组
+  label: { type: String, default: "标签" },         // 文案称呼（日记＝类别，资产＝标签）
 });
 const emit = defineEmits(["update:modelValue", "add-tag"]);
 
@@ -48,7 +49,8 @@ function confirmCustom() {
     </template>
     <template v-else>
       <input v-model="custom" type="text" maxlength="20" class="plain"
-             placeholder="输入标签后回车（可加入标签池）" @keyup.enter="confirmCustom" @blur="confirmCustom">
+             :placeholder="`输入${label}后回车（可加入${label}池）`"
+             @keyup.enter="confirmCustom" @blur="confirmCustom">
     </template>
   </div>
 </template>

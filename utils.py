@@ -1,4 +1,4 @@
-"""通用时间工具：凌晨 4 点日期归属规则相关的计算。"""
+"""通用小工具：时间（凌晨 4 点日期归属规则）与类别文本规范化。"""
 
 import datetime as dt
 
@@ -51,4 +51,26 @@ def day_points_of(entries: list) -> dict:
             continue
         k = date_of(t)
         out[k] = out.get(k, 0) + points
+    return out
+
+
+def clean_categories(raw) -> list[str]:
+    """把"类别"的各种历史写法规范化为字符串列表（多选）。
+
+    - 兼容 v1 单值：`"学习"` → `["学习"]`（老数据不用迁移，读时即转为多选）；
+    - 也接受列表 / 元组 / 集合（任何类型元素统一转成字符串）；
+    - 去首尾空白、丢掉空串、按首次出现顺序去重；
+    - 无类别（None / 空串 / 空列表）→ `[]`。
+    """
+    if raw is None:
+        items: list = []
+    elif isinstance(raw, (list, tuple, set)):
+        items = list(raw)
+    else:
+        items = [raw]
+    out: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if text and text not in out:
+            out.append(text)
     return out

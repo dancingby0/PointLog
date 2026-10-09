@@ -112,10 +112,11 @@ class SummaryApiTest(ApiTestCase):
         r = self.client.get("/api/stats/distribution?range=month")
         body = r.get_json()
         self.assertEqual(r.status_code, 200)
-        # 标签占比：学习 3 分排前
+        # 类别占比：学习 3 分排前
         tags = {t["tag"]: t for t in body["tags"]}
         self.assertEqual(tags["学习"]["points"], 3)
         self.assertEqual(tags["运动"]["points"], 2)
+        self.assertEqual(tags["学习"]["count"], 1)
         # 星期：今天所在星期有 5 点
         wd = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][today.weekday()]
         self.assertEqual(next(x for x in body["weekdays"] if x["label"] == wd)["points"], 5)
@@ -123,6 +124,32 @@ class SummaryApiTest(ApiTestCase):
         periods = {p["label"]: p["points"] for p in body["periods"]}
         self.assertEqual(periods.get("清晨"), 3)
         self.assertEqual(periods.get("下午"), 2)
+
+    def test_distribution_multi_category_splits_points(self):
+        """类别可多选：一条记录命中多个类别时点数均摊，合计仍＝期间总点数。"""
+        today = date_of(dt.datetime.now().astimezone())
+        self.client.post("/api/entries", json={
+            "content": "边听歌边跑步", "points": 3, "category": ["运动", "娱乐"],
+            "ts": dt.datetime.combine(today, dt.time(10, 0)).astimezone().isoformat(),
+        })
+        body = self.client.get("/api/stats/distribution?range=month").get_json()
+        tags = {t["tag"]: t for t in body["tags"]}
+        self.assertEqual(tags["运动"]["points"], 1.5)
+        self.assertEqual(tags["娱乐"]["points"], 1.5)
+        self.assertEqual(tags["运动"]["count"], 1)          # 条数按命中次数计
+        self.assertEqual(sum(t["points"] for t in body["tags"]), 3)
+
+    def test_distribution_legacy_single_category_string(self):
+        """老数据的单值类别（字符串）仍能正确统计。"""
+        today = date_of(dt.datetime.now().astimezone())
+        self.client.post("/api/entries", json={
+            "content": "老记录", "points": 2, "category": "洗衣服",
+            "ts": dt.datetime.combine(today, dt.time(9, 0)).astimezone().isoformat(),
+        })
+        body = self.client.get("/api/stats/distribution?range=month").get_json()
+        tags = {t["tag"]: t for t in body["tags"]}
+        self.assertEqual(tags["洗衣服"]["points"], 2)
+        self.assertEqual(tags["洗衣服"]["count"], 1)
 
     def test_distribution_bad_range(self):
         r = self.client.get("/api/stats/distribution?range=xx")

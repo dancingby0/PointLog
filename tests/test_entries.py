@@ -3,6 +3,8 @@
 import datetime as dt
 import unittest
 
+import config
+import data
 from base import ApiTestCase
 from utils import date_of
 
@@ -27,6 +29,7 @@ class EntriesApiTest(ApiTestCase):
         entry = r.get_json()
         self.assertTrue(entry["id"])
         self.assertEqual(entry["points"], 2)
+        self.assertEqual(entry["category"], ["学习"])   # 类别恒为数组（可多选）
 
         r = self.client.get("/api/entries")
         body = r.get_json()
@@ -142,22 +145,67 @@ class EntriesApiTest(ApiTestCase):
         up = r.get_json()
         self.assertEqual(up["content"], "改后的内容")
         self.assertEqual(up["points"], 3)
-        self.assertEqual(up["category"], "运动")
+        self.assertEqual(up["category"], ["运动"])
 
         # 只改点数：其余字段保持不变
         r = self.client.put(f"/api/entries/{eid}", json={"points": 5})
         up = r.get_json()
         self.assertEqual(up["content"], "改后的内容")
         self.assertEqual(up["points"], 5)
+        self.assertEqual(up["category"], ["运动"])
 
     def test_update_404(self):
         r = self.client.put("/api/entries/nonexistent", json={"points": 1})
         self.assertEqual(r.status_code, 404)
 
-    def test_category_nullable(self):
+    def test_category_defaults_to_empty_list(self):
+        """不传类别 → 空数组（＝无类别）。"""
         r = self.client.post("/api/entries", json={"content": "无类别", "points": 1})
-        body = r.get_json()
-        self.assertIsNone(body.get("category"))
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.get_json()["category"], [])
+
+    def test_multi_category(self):
+        """类别可多选：数组按勾选顺序保存，顺带去空白、去重、丢掉空串。"""
+        r = self.client.post("/api/entries", json={
+            "content": "一边背单词一边做数学题",
+            "points": 2,
+            "category": [" 学习 ", "数学", "学习", ""],
+        })
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.get_json()["category"], ["学习", "数学"])
+
+        body = self.client.get("/api/entries").get_json()
+        self.assertEqual(body["entries"][0]["category"], ["学习", "数学"])
+
+    def test_legacy_single_category_still_readable(self):
+        """老数据里的单值写法（字符串 / null）读时自动变数组，无需迁移。"""
+        now = dt.datetime.now().astimezone().isoformat()
+        d = data.load(config.CURRENT_PROFILE)
+        d["entries"].append({"id": "legacy-1", "ts": now, "points": 1,
+                             "content": "老记录", "category": "洗衣服"})
+        d["entries"].append({"id": "legacy-2", "ts": now, "points": 1,
+                             "content": "老记录2", "category": None})
+        data.save(config.CURRENT_PROFILE, d)
+
+        body = self.client.get("/api/entries").get_json()
+        cats = {e["content"]: e["category"] for e in body["entries"]}
+        self.assertEqual(cats["老记录"], ["洗衣服"])
+        self.assertEqual(cats["老记录2"], [])
+
+    def test_update_categories(self):
+        """编辑时可整体替换类别（含清空；也接受老的单值写法）。"""
+        r = self.client.post("/api/entries", json={"content": "多类别", "points": 1,
+                                                  "category": ["学习"]})
+        eid = r.get_json()["id"]
+
+        r = self.client.put(f"/api/entries/{eid}", json={"category": ["学习", "运动"]})
+        self.assertEqual(r.get_json()["category"], ["学习", "运动"])
+
+        r = self.client.put(f"/api/entries/{eid}", json={"category": []})
+        self.assertEqual(r.get_json()["category"], [])
+
+        r = self.client.put(f"/api/entries/{eid}", json={"category": "语文"})
+        self.assertEqual(r.get_json()["category"], ["语文"])
 
     def test_zero_points_entry_allowed(self):
         """0 点＝单纯记录（不做激励）：可创建、不出错，当天点数仍是 0。"""
