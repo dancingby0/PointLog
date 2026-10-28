@@ -12,6 +12,7 @@
 - 贡献日历（当年热力图，年份翻页，点击跳转日期）
 - 多本地档案隔离 + 每档案 PIN 锁（闲置 5 分钟自动锁）
 - 数据存本地 JSON 文件；打卡记录与资产账本均可按日期区间导出（默认落盘 `exports/`，也可下载到浏览器）
+- **桌面活动统计（可选，v2.6）**：接入本机 [ActivityWatch](https://activitywatch.net/) —— 自动汇总每天的真实活跃时长、应用、网站、页面（装 `aw-watcher-web` 扩展可精确到 `deepseek.com` / `bilibili.com` 这类具体站点），类别规则可自定义；ActivityWatch 不装也不影响任何其他功能
 
 ## 快速开始
 
@@ -49,6 +50,20 @@ frontend/
    ├─ assets/main.css    # 全局样式
    └─ components/        # 按功能拆的 .vue 组件
 ```
+
+## 桌面活动统计（可选，需要 ActivityWatch）
+
+不装也能正常用；装上之后「活动」页会显示每天真实的活跃时长、应用、网站与具体页面。
+
+1. 安装并运行 [ActivityWatch](https://activitywatch.net/)（托盘常驻，本地服务 `http://127.0.0.1:5600`）；
+2. 想精确到具体网页（区分 DeepSeek / B 站这类站点），再装官方浏览器扩展
+   [aw-watcher-web](https://github.com/ActivityWatch/aw-watcher-web)（Chrome / Firefox 商店）；
+3. 打开 PointLog 的「活动」页 → 点「同步今天 / 近 7 天」，即可看到明细；
+   类别规则（正则匹配 `app` / `title` / `url`）在页面底部编辑，例如
+   `url=bilibili.com` + `title=课程|考研` → 学习。
+
+口径：活跃时长 = 前台窗口事件 ∩ 非 AFK 区间；归属日沿用凌晨 4 点规则；网页只算活动标签页。
+数据只在本机流转，同步幂等（重跑只覆盖当天摘要）。
 
 ## 数据维护
 

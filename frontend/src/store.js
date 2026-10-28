@@ -35,6 +35,14 @@ export const state = reactive({
   statsDist: null,        // 统计：分布（标签/星期/时段）
   statsAssets: [],        // 统计：收支月度趋势
   assetStats: null,       // 资产统计分析（筛选+粒度+折线/饼图）
+  // 活动数据（v2.6，来自本机 ActivityWatch）
+  activityStatus: null,   // 连接状态 + 桶列表
+  activityDay: null,      // 当前查看日的活动明细
+  activityDays: [],       // 区间每日摘要（图表用）
+  activityDayKey: "",     // 当前查看日 YYYY-MM-DD
+  activityBusy: false,    // 同步中
+  activityError: "",      // 最近一次错误信息
+  activityConfig: null,   // 活动数据设置
   editingId: null,        // 正在编辑的记录 id
   form: { content: "", points: 1, category: [], start: "", end: "", ts: "", lockMin: null },
   noteDraft: "",          // 感想草稿
@@ -300,6 +308,13 @@ export function resetForProfileChange() {
   state.goalEditing = false;
   state.line = null;
   state.diaryTags = [];
+  state.activityStatus = null;
+  state.activityDay = null;
+  state.activityDays = [];
+  state.activityDayKey = "";
+  state.activityBusy = false;
+  state.activityError = "";
+  state.activityConfig = null;
 }
 
 export async function doSwitch(name) {
@@ -1150,6 +1165,98 @@ export async function loadStatsAssets() {
     state.statsAssets = data;
   } catch (err) {
     console.error(err);
+  }
+}
+
+// ================= 活动数据（ActivityWatch，v2.6） =================
+// 约定：ActivityWatch 连不上只影响本模块，`activityError` 里带原因，页面照常可用。
+
+async function activityJson(url, options) {
+  const res = await fetch(url, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `请求失败（${res.status}）`);
+  return data;
+}
+
+export async function loadActivityStatus() {
+  try {
+    state.activityStatus = await activityJson("/api/activity/status");
+    state.activityError = state.activityStatus.error || "";
+  } catch (err) {
+    state.activityStatus = null;
+    state.activityError = err.message;
+  }
+  return state.activityStatus;
+}
+
+export async function loadActivityConfig() {
+  try {
+    const data = await activityJson("/api/activity/config");
+    state.activityConfig = data.settings;
+  } catch (err) {
+    state.activityError = err.message;
+  }
+  return state.activityConfig;
+}
+
+export async function saveActivityConfig(patch) {
+  const data = await activityJson("/api/activity/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  state.activityConfig = data.settings;
+  return data.settings;
+}
+
+export async function loadActivityDay(day = state.activityDayKey) {
+  if (!day) return null;
+  state.activityDayKey = day;
+  try {
+    state.activityDay = await activityJson(`/api/activity/day/${day}`);
+    state.activityError = "";
+  } catch (err) {
+    state.activityDay = null;
+    state.activityError = err.message;   // 404＝这一天还没同步
+  }
+  return state.activityDay;
+}
+
+export async function loadActivityRange(from = "", to = "") {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  try {
+    const data = await activityJson(`/api/activity/days?${p.toString()}`);
+    state.activityDays = data.days || [];
+  } catch (err) {
+    state.activityDays = [];
+    state.activityError = err.message;
+  }
+  return state.activityDays;
+}
+
+export async function syncActivity(days = 1) {
+  state.activityBusy = true;
+  state.activityError = "";
+  try {
+    const data = await activityJson("/api/activity/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ days }),
+    });
+    if (data.days && data.days.length) {
+      state.activityDayKey = data.days[data.days.length - 1].day;
+    }
+    await loadActivityStatus();
+    await loadActivityRange();
+    if (state.activityDayKey) await loadActivityDay(state.activityDayKey);
+    return data;
+  } catch (err) {
+    state.activityError = err.message;
+    throw err;
+  } finally {
+    state.activityBusy = false;
   }
 }
 

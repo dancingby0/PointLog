@@ -54,6 +54,15 @@ export function formatDuration(min) {
   return `${h} 小时 ${m} 分`;
 }
 
+// 分钟数 → 紧凑时长：95 → "1h35m"；90 → "1h30m"；45 → "45m"（表格里省地方）
+export function formatMinutesCompact(min) {
+  const total = Math.round(Number(min) || 0);
+  if (total <= 0) return "0m";
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return h ? `${h}h${String(m).padStart(2, "0")}m` : `${m}m`;
+}
+
 // "YYYY-MM-DDTHH:MM"（<input type=datetime-local> 的值）→ 本地 Date；空/非法 → null
 export function fromLocalInput(s) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(s || "").trim());

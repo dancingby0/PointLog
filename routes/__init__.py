@@ -12,9 +12,23 @@
 - routes/assets.py   资产 API（账户/收支/转账/余额校准，个人级）
 - routes/statistics.py 统计 API（坚持与概况等）
 - routes/accounts.py  本地账号 API（v2.3）
+- routes/activity.py  活动数据 API（v2.6，从本机 ActivityWatch 拉取桌面活动）
 """
 
-from . import accounts, assets, days, entries, export, memos, notes, pages, profiles, statistics, tags
+from . import (
+    accounts,
+    activity,
+    assets,
+    days,
+    entries,
+    export,
+    memos,
+    notes,
+    pages,
+    profiles,
+    statistics,
+    tags,
+)
 
 
 def register_blueprints(app):
@@ -29,3 +43,4 @@ def register_blueprints(app):
     app.register_blueprint(assets.bp)
     app.register_blueprint(statistics.bp)
     app.register_blueprint(accounts.bp)
+    app.register_blueprint(activity.bp)

@@ -5,6 +5,7 @@ v1 约定：
 - 文件操作采用"原子写"：先写临时文件再替换，避免中途断电损坏数据。
 """
 
+import copy
 import json
 import os
 import shutil
@@ -162,6 +163,71 @@ def save(profile: str, data: dict) -> None:
 def new_id() -> str:
     """生成记录 ID：毫秒时间戳（本机单用户足够唯一）。"""
     return str(int(time.time() * 1000))
+
+
+# ---------- 活动数据：档案级（v2.6，来自 ActivityWatch） ----------
+# 为什么要独立文件而不是塞进 data.json：
+# 1) data.json 是"全量读—改—写"，活动摘要是几百 KB 的派生数据，混进去会让每次打卡都变慢；
+# 2) 活动数据可以由原始事件随时重算（幂等），坏了能丢；data.json 不能丢。
+
+ACTIVITY_FILE = "activity.json"
+
+
+def activity_path(profile: str) -> Path:
+    """档案级活动数据文件（与 data.json / settings.json 平级）。"""
+    return profile_dir(profile) / ACTIVITY_FILE
+
+
+def default_activity() -> dict:
+    """全新活动数据结构：settings（含默认类别规则）+ 每日摘要。"""
+    import activity                     # 局部导入：避免模块级循环依赖
+    return {
+        "version": 1,
+        "settings": copy.deepcopy(activity.DEFAULT_SETTINGS),
+        "days": {},
+    }
+
+
+def load_activity(profile: str) -> dict:
+    """读取活动数据；不存在/损坏 → 默认结构（损坏时另存 .bak，不覆盖历次备份）。"""
+    path = activity_path(profile)
+    base = default_activity()
+    if not path.exists():
+        return base
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        backup = path.with_suffix(".json.bak")
+        try:
+            if not backup.exists():
+                path.replace(backup)
+        except OSError:
+            pass
+        return base
+    if not isinstance(raw, dict):
+        return base
+    for key in base:
+        raw.setdefault(key, copy.deepcopy(base[key]))
+    if not isinstance(raw.get("days"), dict):
+        raw["days"] = {}
+    if not isinstance(raw.get("settings"), dict):
+        raw["settings"] = base["settings"]
+    else:                                # 逐键补默认：老版本文件升级后也能用
+        for key, value in base["settings"].items():
+            raw["settings"].setdefault(key, copy.deepcopy(value))
+    return raw
+
+
+def save_activity(profile: str, payload: dict) -> None:
+    """原子写 activity.json（先 .tmp 再替换）。"""
+    path = activity_path(profile)
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
 
 
 # ---------- 资产数据：账号级（v2.3） ----------

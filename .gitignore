@@ -28,3 +28,6 @@ frontend/node_modules/
 
 # 导出文件（个人数据，绝不入库）
 exports/
+
+# 第三方仓库参考副本（浅克隆 ActivityWatch，仅本地阅读源码）
+.refs/

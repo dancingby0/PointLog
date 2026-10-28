@@ -34,6 +34,7 @@
 - **v2.3 本地账号系统**：账号层（档案与资产挂到账号下）+ 账号锁（唯一总锁，10分钟免输）+ 账号页（本次新增）
 - **v2.4 打卡体验**：时间改为可选时段（自动算消耗时长）+ 点数支持 0（只记录）+ 打卡记录区间导出 + 历史记录迁移为"不选时间"
 - **v2.5 打卡类别多选**：一条记录可挂多个类别（点选 / 再点取消 / 自定义），统计按类别均摊；老数据的单值类别读时自动兼容
+- **v2.6 桌面活动接入**：旁路读取本机 ActivityWatch 的窗口/AFK/网页事件，聚合成"每日活动摘要"（活跃时长、应用、网站、页面），独立页面查看；不自动折算点数
 
 ## 1. 设计原则（延续 v1，v2 追加）
 
@@ -172,6 +173,7 @@
 - [x] 历史打卡记录已迁移为"不选时间"：`ts` 规范化为归属日 12:00（归属日与点数不变），脚本 `migrate_entries.py` 幂等且运行前留 `.bak` 备份
 - [x] 打卡类别支持多选：一条记录可挂多个类别（点选多个 / 再点取消 / 自定义入池）；列表逐条显示、导出为数组、统计按类别数均摊点数（v2.5 已实现并测试）
 - [x] 打卡记录可在档案间转移：`transfer_entries.py`（默认转移＝源档案记录清空，`--copy` 只复制）按 `id` 幂等、只搬打卡记录（感想/备忘/主目标不动，类别池取并集），写盘前自动留带时间戳的备份（已实现并测试）
+- [x] 桌面活动可接入（v2.6）：旁路只读本机 ActivityWatch（窗口+AFK+网页），聚合成每日活跃/应用/网站/页面摘要，独立「活动」页查看与同步；AW 不可用时零影响（已实现并测试）
 
 ## 8. 待定问题（open questions）
 
@@ -353,5 +355,79 @@ python transfer_entries.py --from <源档案> --to <目标档案> [--account <�
 - [x] 转移后目标档案 = 原记录 + 源记录（条数与点数合计相等、`id` 无重复），源档案 `entries` 为空
 - [x] 感想 / 备忘 / 主目标不受影响；类别池取并集，可 `--no-merge-tags` 关闭
 - [x] 重复执行安全（幂等）、`--dry-run` 不写盘、每次写盘前都有带时间戳的备份（有单测兜底）
+
+## 13. v2.6 桌面活动接入（ActivityWatch）
+
+### 13.1 定位与边界
+- ActivityWatch（AW）是**外部数据源**，不 fork、不嵌入、不复制代码（MPL-2.0，只通过本机 REST 消费数据）；
+- **只读**：PointLog 只发 `GET`（`/api/0/buckets/`、`/api/0/buckets/<id>/events`），
+  避开 aw-server 与 aw-server-rust 在 POST/query 上的行为差异；
+- **降级优先**：AW 没装/没开/崩了 → `/api/activity/status` 返回 `connected:false`、
+  `/sync` 返回 503 + 提示；打卡、感想、统计等既有功能路径完全不 import 本模块，零影响；
+- 数据不出本机；不在浏览器直连 AW（避免改 `cors_origins`），统一由 Flask 代取。
+
+### 13.2 存储：`activity.json`（档案级，与 data.json 平级）
+```jsonc
+{
+  "version": 1,
+  "settings": {
+    "enabled": true, "base_url": "http://127.0.0.1:5600", "api_token": "",
+    "host": "", "gap_allow_sec": 120, "ignored_apps": ["activitywatch", "pointlog"],
+    "rules": [ {"category": "AI辅助", "url": "deepseek\\.com"},
+               {"category": "学习", "url": "bilibili\\.com", "title": "课程|考研"} ]
+  },
+  "days": {
+    "2026-10-11": {
+      "day": "2026-10-11", "active_min": 45.0, "excluded_min": 0.0,
+      "first_ts": "…", "last_ts": "…",
+      "apps": [{"app": "Code", "min": 45.0, "category": "编程"}],
+      "categories": [{"category": "编程", "min": 45.0}],
+      "sites": [{"domain": "chat.deepseek.com", "min": 25.0, "category": "AI辅助", "audible": false}],
+      "pages": [{"domain": "bilibili.com", "title": "考研数学 强化课", "min": 12.0}],
+      "titles": [{"title": "activity.py — PointLog", "min": 20.0}],
+      "source": "activitywatch", "imported_at": "2026-10-11T22:40:00+08:00"
+    }
+  }
+}
+```
+- 独立文件的原因：`data.json` 是"全量读—改—写"，活动摘要是派生数据且可重算，混进去会拖慢每次打卡；
+- 同步**幂等**：同一天重复同步＝覆盖写，结果只取决于 AW 里的事实数据。
+
+### 13.3 口径（三处关键约定）
+1. **归属日沿用凌晨 4 点规则**：AW 时间是 UTC，本地换算后与 `[D 04:00, D+1 04:00)` 求交，
+   与打卡归属完全一致（跨 4 点的记录会被切到两天）；
+2. **活跃时长 = 窗口事件 ∩ `not-afk`**：不是"窗口存在"的时间；缺 AFK 数据时按 0 计（宁缺勿滥）；
+   网页事件同样要与活跃区间求交，后台标签页不计；
+3. **类别规则**：`app` / `title` / `url` 三个正则，**给出的字段必须全部命中**（AND，字段内可写 `a|b`）；
+   自上而下首个命中生效，未命中＝`未分类`；`[]` 表示不分类，缺省用内置默认规则。
+
+### 13.4 API（`routes/activity.py`）
+| 端点 | 说明 |
+|---|---|
+| `GET /api/activity/status` | 连接状态、桶列表、挑中的 window/afk/web 桶、已同步天数、缺 web 桶时的提示 |
+| `GET/PUT /api/activity/config` | 活动设置（地址/主机/阈值/忽略应用/类别规则），PUT 校验正则与 base_url |
+| `POST /api/activity/sync` | `{days:N}` 或 `{from,to}`（≤120 天）→ 逐日拉取聚合；AW 不通 503、缺桶 409 |
+| `GET /api/activity/days` | 区间每日摘要（轻量：活跃时长 + Top 应用/网站） |
+| `GET /api/activity/day/<date>` | 单日明细（apps/categories/sites/pages/titles）；未同步 404 |
+| `DELETE /api/activity/day/<date>` | 删除某天摘要（想重算时先清） |
+
+### 13.5 前端
+- 新增「活动」页（`views/ActivityView.vue`）：连接状态灯 + 同步按钮（今天/7 天/30 天）+
+  日期切换 + 活跃时长/应用 Top/类别占比（ECharts）+ 网站表 + **具体页面表**（同域名按标题拆开，
+  用来区分"B 站课程"和"B 站娱乐"）+ 设置区（地址、主机、阈值、忽略应用、类别规则编辑器）。
+
+### 13.6 验收要点
+- [x] AW 未安装/未启动：状态页显示"未连接 + 安装指引"，其余功能零影响（有单测兜底）
+- [x] 活跃时长 = 窗口 ∩ `not-afk`；跨 04:00 的记录正确切到两天；后台标签页不计入网站时长
+- [x] 同域名下按 `url` + `title` 双条件区分内容（DeepSeek / B 站课程 / B 站娱乐）
+- [x] 同步幂等（重复同步不重复累加）、单次 ≤120 天、缺窗口/AFK 桶时明确报 409
+- [x] 客户端只发 GET，且请求参数为 UTC RFC3339（有假 HTTP 服务单测兜底）
+
+### 13.7 尚未做（后续）
+- 「专注会话」：AW 自带 Stopwatch（桶 `aw-stopwatch`，事件 `{running, label}`）：正计时/暂停/继续都有，
+  但**没有桌面悬浮窗和全局快捷键**；要悬浮窗需另写一个小工具写入该桶（P3）；
+- 打卡对账：拿 `entries` 的时段与 AW 活跃区间比对（"你记了 90 分钟，AW 只观测到 25 分钟"）；
+- 活动数据的趋势图（近 N 天活跃/专注 vs 点数双轴）。
+
 
 
