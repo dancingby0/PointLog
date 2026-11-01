@@ -11,14 +11,22 @@ const emit = defineEmits(["update:schedule"]);
 const MODES = [
   { key: "none", label: "不设定" },
   { key: "daily", label: "每天" },
+  { key: "weekdays", label: "每周几" },
   { key: "dates", label: "指定日期" },
   { key: "monthdays", label: "每月几号" },
+];
+
+const WEEKDAYS = [
+  { key: 0, label: "一" }, { key: 1, label: "二" }, { key: 2, label: "三" },
+  { key: 3, label: "四" }, { key: 4, label: "五" }, { key: 5, label: "六" },
+  { key: 6, label: "日" },
 ];
 
 const local = reactive({
   mode: props.schedule?.mode || "none",
   ranges: [...(props.schedule?.ranges || [])],
   monthdays: [...(props.schedule?.monthdays || [])],
+  weekdays: [...(props.schedule?.weekdays || [])],
 });
 
 // 外部（切换编辑对象 / 保存后刷新）改了就同步进来
@@ -28,6 +36,7 @@ watch(
     local.mode = next?.mode || "none";
     local.ranges = [...(next?.ranges || [])];
     local.monthdays = [...(next?.monthdays || [])];
+    local.weekdays = [...(next?.weekdays || [])];
   },
   { deep: true }
 );
@@ -37,6 +46,7 @@ function emitChange() {
     mode: local.mode,
     ranges: local.ranges.map((r) => ({ ...r })),
     monthdays: local.monthdays.map((r) => ({ ...r })),
+    weekdays: [...local.weekdays].sort((a, b) => a - b),
   });
 }
 
@@ -44,6 +54,15 @@ function setMode(key) {
   local.mode = key;
   if (key === "dates" && !local.ranges.length) local.ranges = [{ from: "", to: "" }];
   if (key === "monthdays" && !local.monthdays.length) local.monthdays = [{ from: 1, to: 1 }];
+  if (key === "weekdays" && !local.weekdays.length) local.weekdays = [0];
+  emitChange();
+}
+
+function toggleWeekday(wd) {
+  const list = [...local.weekdays];
+  const i = list.indexOf(wd);
+  if (i === -1) list.push(wd); else list.splice(i, 1);
+  local.weekdays = list;
   emitChange();
 }
 
@@ -87,6 +106,7 @@ function onMonth(index, key, value) {
 }
 
 const hint = computed(() => {
+  if (local.mode === "weekdays") return "每周固定的星期几生效，可多选（如每周六、周日）";
   if (local.mode === "dates") return "闭区间，含首尾两天；可加多段（如 10-08~10-09、10-11~10-12）";
   if (local.mode === "monthdays") return "每月固定几号生效；可加多段（如 8→9、11→12）";
   if (local.mode === "daily") return "每天都出现在日常提醒里";
@@ -102,7 +122,16 @@ const hint = computed(() => {
               @click="setMode(m.key)">{{ m.label }}</button>
     </div>
 
-    <div v-if="local.mode === 'dates'" class="sched-rows">
+    <div v-if="local.mode === 'weekdays'" class="sched-rows">
+      <div class="sched-modes">
+        <button v-for="w in WEEKDAYS" :key="w.key" type="button" class="tiny"
+                :class="local.weekdays.includes(w.key) ? 'on' : 'ghost'"
+                @click="toggleWeekday(w.key)">{{ w.label }}</button>
+      </div>
+      <p class="muted sched-hint" v-if="!local.weekdays.length">还没选星期（会退化成"不设定"）</p>
+    </div>
+
+    <div v-else-if="local.mode === 'dates'" class="sched-rows">
       <div v-for="(r, i) in local.ranges" :key="i" class="sched-row">
         <input type="date" :value="r.from" @input="onRangeFrom(i, $event.target.value)" />
         <span class="muted">~</span>

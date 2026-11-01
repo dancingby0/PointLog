@@ -11,14 +11,16 @@
    - ``daily``     每天
    - ``dates``     绝对日期段，可多段（如 10-08~10-09、10-11~10-12）
    - ``monthdays`` 每月几号到几号，可多段（如 8-9、11-12）
+   - ``weekdays``  每周周几（可多选，如每周六、周日）
    某天的日常里，凡是"这天生效"的备忘会被自动插入提醒；结束日已过＝过期，界面标红但**不删除**。
 
 时间范围一律用**闭区间**（含首尾两天），与导出的 from/to 语义一致。
+``weekdays`` 用 0-6 表示周一至周日（与 ``date.weekday()`` 一致，与日常项的 ``days`` 同口径）。
 """
 
 import datetime as dt
 
-MODES = ("none", "daily", "dates", "monthdays")
+MODES = ("none", "daily", "dates", "monthdays", "weekdays")
 WEEKDAY_LABELS = ("一", "二", "三", "四", "五", "六", "日")
 
 
@@ -32,12 +34,12 @@ def _parse_date(value):
 # ---------- 备忘录时间范围 ----------
 
 def normalize_schedule(raw) -> dict:
-    """把各种历史/手写写法规范化为 {mode, ranges, monthdays}（不合法部分丢弃）。"""
+    """把各种历史/手写写法规范化为 {mode, ranges, monthdays, weekdays}（不合法部分丢弃）。"""
     data = raw if isinstance(raw, dict) else {}
     mode = str(data.get("mode") or "none").strip()
     if mode not in MODES:
         mode = "none"
-    ranges, monthdays = [], []
+    ranges, monthdays, weekdays = [], [], []
     for item in data.get("ranges") or []:
         if not isinstance(item, dict):
             continue
@@ -61,11 +63,21 @@ def normalize_schedule(raw) -> dict:
         if end < start:
             start, end = end, start
         monthdays.append({"from": start, "to": end})
+    for item in data.get("weekdays") or []:
+        try:
+            wd = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= wd <= 6 and wd not in weekdays:
+            weekdays.append(wd)
+    weekdays.sort()
     if mode == "dates" and not ranges:
         mode = "none"
     if mode == "monthdays" and not monthdays:
         mode = "none"
-    return {"mode": mode, "ranges": ranges, "monthdays": monthdays}
+    if mode == "weekdays" and not weekdays:
+        mode = "none"
+    return {"mode": mode, "ranges": ranges, "monthdays": monthdays, "weekdays": weekdays}
 
 
 def memo_active_on(schedule: dict, day: dt.date) -> bool:
@@ -77,11 +89,13 @@ def memo_active_on(schedule: dict, day: dt.date) -> bool:
         return any(_parse_date(r["from"]) <= day <= _parse_date(r["to"]) for r in sch["ranges"])
     if sch["mode"] == "monthdays":
         return any(r["from"] <= day.day <= r["to"] for r in sch["monthdays"])
+    if sch["mode"] == "weekdays":
+        return day.weekday() in sch["weekdays"]
     return False
 
 
 def memo_end(schedule: dict):
-    """这条备忘最后一次生效的日期（daily / monthdays 无终点 → None）。"""
+    """这条备忘最后一次生效的日期（daily / monthdays / weekdays 会循环 → None）。"""
     sch = normalize_schedule(schedule)
     if sch["mode"] == "dates":
         ends = [_parse_date(r["to"]) for r in sch["ranges"]]
@@ -90,7 +104,7 @@ def memo_end(schedule: dict):
 
 
 def memo_expired(schedule: dict, today: dt.date) -> bool:
-    """过期＝已过最后生效日（daily / monthdays 会循环，不算过期）。"""
+    """过期＝已过最后生效日（daily / monthdays / weekdays 会循环，不算过期）。"""
     end = memo_end(schedule)
     return bool(end and today > end)
 
@@ -107,6 +121,11 @@ def schedule_text(schedule: dict) -> str:
         return "每月 " + "、".join(
             f"{r['from']}–{r['to']} 号" if r["from"] != r["to"] else f"{r['from']} 号"
             for r in sch["monthdays"])
+    if sch["mode"] == "weekdays":
+        names = [WEEKDAY_LABELS[d] for d in sch["weekdays"]]
+        if len(names) == 7:
+            return "每天"
+        return "每周" + "、".join(names)
     return "不设定"
 
 

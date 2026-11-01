@@ -206,6 +206,48 @@ class DayScheduleTest(unittest.TestCase):
         self.assertEqual(view2["reminders"][0]["text"], "还在的")
 
 
+class WeekdayScheduleTest(unittest.TestCase):
+    """每周几（可多选）。2026-11-01 是周日，11-02 周一，11-07 周六。"""
+
+    def test_weekdays_multiple(self):
+        sch = {"mode": "weekdays", "weekdays": [5, 6]}          # 周六、周日
+        self.assertTrue(routine.memo_active_on(sch, D("2026-11-01")))   # 周日
+        self.assertFalse(routine.memo_active_on(sch, D("2026-11-02")))  # 周一
+        self.assertTrue(routine.memo_active_on(sch, D("2026-11-07")))   # 周六
+
+    def test_weekdays_sorted_and_deduped(self):
+        sch = routine.normalize_schedule({"mode": "weekdays",
+                                          "weekdays": [6, 5, 5, 9, "1", "x"]})
+        self.assertEqual(sch["weekdays"], [1, 5, 6])       # 9/x 丢弃、去重、升序
+
+    def test_weekdays_without_selection_degrades_to_none(self):
+        self.assertEqual(routine.normalize_schedule({"mode": "weekdays", "weekdays": []})["mode"],
+                         "none")
+
+    def test_weekdays_never_expires(self):
+        sch = {"mode": "weekdays", "weekdays": [6]}
+        self.assertFalse(routine.memo_expired(sch, D("2030-01-01")))
+
+    def test_weekdays_text(self):
+        self.assertEqual(routine.schedule_text({"mode": "weekdays", "weekdays": [5, 6]}),
+                         "每周六、日")
+        self.assertEqual(routine.schedule_text({"mode": "weekdays", "weekdays": [0]}), "每周一")
+        self.assertEqual(routine.schedule_text({"mode": "weekdays", "weekdays": [0, 1, 2, 3, 4, 5, 6]}),
+                         "每天")     # 七天全选等同每天
+
+    def test_all_modes_keep_other_fields(self):
+        """切换模式不改动其他模式的数据（用户来回切不会丢已填内容）。"""
+        sch = routine.normalize_schedule({
+            "mode": "weekdays", "weekdays": [6],
+            "ranges": [{"from": "2026-10-08", "to": "2026-10-09"}],
+            "monthdays": [{"from": 8, "to": 9}],
+        })
+        self.assertEqual(sch["mode"], "weekdays")
+        self.assertEqual(len(sch["ranges"]), 1)
+        self.assertEqual(len(sch["monthdays"]), 1)
+        self.assertEqual(len(sch["weekdays"]), 1)
+
+
 class ScheduleTextTest(unittest.TestCase):
     def test_texts(self):
         self.assertEqual(routine.schedule_text({"mode": "none"}), "不设定")

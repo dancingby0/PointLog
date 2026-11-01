@@ -147,6 +147,27 @@ class MemoScheduleApiTest(ApiTestCase):
     def test_rejects_empty_text(self):
         self.assertEqual(self.client.post("/api/memos", json={"text": "  "}).status_code, 400)
 
+    def test_create_with_weekdays(self):
+        """每周几（可多选）：存进 schedule.weekdays，并生成可读文本。"""
+        res = self.client.post("/api/memos", json={
+            "text": "每周六日教弟弟编程",
+            "schedule": {"mode": "weekdays", "weekdays": [5, 6]}})
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.get_json()["schedule"]["weekdays"], [5, 6])
+
+        listed = self.client.get("/api/memos").get_json()["memos"][0]
+        self.assertEqual(listed["when"], "每周六、日")
+        self.assertFalse(listed["expired"])            # 循环模式永不过期
+
+    def test_weekdays_memo_appears_on_matching_day_only(self):
+        self.client.post("/api/memos", json={
+            "text": "周末提醒", "schedule": {"mode": "weekdays", "weekdays": [5, 6]}})
+        # 2026-11-01 周日 → 出现；11-03 周二 → 不出现
+        sunday = self.client.get("/api/schedule?day=2026-11-01").get_json()
+        self.assertIn("周末提醒", [m["text"] for m in sunday["reminders"]])
+        tuesday = self.client.get("/api/schedule?day=2026-11-03").get_json()
+        self.assertNotIn("周末提醒", [m["text"] for m in tuesday["reminders"]])
+
 
 if __name__ == "__main__":
     unittest.main()
