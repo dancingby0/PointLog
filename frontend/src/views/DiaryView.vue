@@ -4,6 +4,7 @@ import TodayCard from "../components/TodayCard.vue";
 import GoalCard from "../components/GoalCard.vue";
 import DayPicker from "../components/DayPicker.vue";
 import ContribCalendar from "../components/ContribCalendar.vue";
+import RoutineCard from "../components/RoutineCard.vue";
 import EntryForm from "../components/EntryForm.vue";
 import EntryList from "../components/EntryList.vue";
 import EntryExportCard from "../components/EntryExportCard.vue";
@@ -18,6 +19,7 @@ import MemoCard from "../components/MemoCard.vue";
     <GoalCard />
     <DayPicker />
     <ContribCalendar />
+    <RoutineCard />
     <EntryForm />
     <EntryList />
     <EntryExportCard />

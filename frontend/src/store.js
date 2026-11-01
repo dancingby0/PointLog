@@ -50,6 +50,15 @@ export const state = reactive({
   noteEditing: false,     // 是否在编辑感想
   memos: [],
   memoDraft: "",
+  // 新增备忘时的时间范围（v2.7）：{mode, ranges, monthdays}
+  memoSchedule: { mode: "none", ranges: [], monthdays: [] },
+  memoEditingId: null,     // 正在编辑时间范围的备忘 id
+  memoEditDraft: null,     // 该备忘的编辑草稿 {text, schedule}
+  // 每日日常 + 点数规定（v2.7，档案级）
+  routines: [],            // 全部日常项（含停用的）
+  schedule: null,          // 当前所选日的日常 + 备忘提醒
+  routineEditingId: null,  // 正在编辑的日常 id（"new" 表示新增）
+  routineDraft: null,
   mainGoal: "",
   goalDraft: "",
   goalEditing: false,
@@ -308,6 +317,13 @@ export function resetForProfileChange() {
   state.goalEditing = false;
   state.line = null;
   state.diaryTags = [];
+  state.memoSchedule = blankSchedule();
+  state.memoEditingId = null;
+  state.memoEditDraft = null;
+  state.routines = [];
+  state.schedule = null;
+  state.routineEditingId = null;
+  state.routineDraft = null;
   state.activityStatus = null;
   state.activityDay = null;
   state.activityDays = [];
@@ -469,6 +485,7 @@ export async function loadAll() {
     await loadDays();
     await loadCalendar();
     await loadMemos();
+    await loadRoutines();
     await loadLine();
     const target = state.days.find((d) => d.is_today) || state.days[0];
     await selectDay(target ? target.date : todayStr());
@@ -497,6 +514,7 @@ export async function selectDay(day) {
   state.selectedDay = day;
   await loadEntries();
   await loadNote();
+  await loadSchedule(day);
 }
 
 export async function loadDays() {
@@ -842,6 +860,102 @@ export function cellTitle(c) {
   return c.points > 0 ? `${c.date} · ${c.points} 点` : c.date;
 }
 
+// ================= 每日日常 + 点数规定（v2.7） =================
+
+export function blankSchedule() {
+  return { mode: "none", ranges: [], monthdays: [] };
+}
+
+export function resetMemoSchedule() {
+  state.memoSchedule = blankSchedule();
+}
+
+export function blankRoutine() {
+  return { start: "08:00", end: "09:00", text: "", points: 1, days: [], enabled: true, note: "" };
+}
+
+export async function loadRoutines() {
+  try {
+    const res = await fetch("/api/routines");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载日常失败");
+    state.routines = data.routines;
+  } catch (err) {
+    console.error(err);
+    state.routines = [];
+  }
+}
+
+export async function loadSchedule(day = state.selectedDay) {
+  const target = day || "";
+  try {
+    const q = target ? `?day=${target}` : "";
+    const res = await fetch(`/api/schedule${q}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载日常失败");
+    state.schedule = data;
+  } catch (err) {
+    console.error(err);
+    state.schedule = null;
+  }
+}
+
+export function startRoutineEdit(item = null) {
+  state.routineEditingId = item ? item.id : "new";
+  state.routineDraft = item
+    ? { start: item.start, end: item.end, text: item.text, points: item.points,
+        days: [...(item.days || [])], enabled: item.enabled !== false, note: item.note || "" }
+    : blankRoutine();
+}
+
+export function cancelRoutineEdit() {
+  state.routineEditingId = null;
+  state.routineDraft = null;
+}
+
+export function toggleRoutineDay(weekday) {
+  if (!state.routineDraft) return;
+  const days = state.routineDraft.days;
+  const i = days.indexOf(weekday);
+  if (i === -1) days.push(weekday); else days.splice(i, 1);
+  state.routineDraft.days = [...days].sort((a, b) => a - b);
+}
+
+export async function saveRoutine() {
+  const draft = state.routineDraft;
+  if (!draft) return;
+  const editing = state.routineEditingId;
+  try {
+    const url = editing === "new" ? "/api/routines" : `/api/routines/${editing}`;
+    const res = await fetch(url, {
+      method: editing === "new" ? "POST" : "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    await loadRoutines();
+    await loadSchedule();
+    cancelRoutineEdit();
+  } catch (err) {
+    alert("保存日常失败：" + err.message);
+  }
+}
+
+export async function delRoutine(id) {
+  if (!confirm("删除这条日常？")) return;
+  try {
+    const res = await fetch(`/api/routines/${id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "删除失败");
+    await loadRoutines();
+    await loadSchedule();
+  } catch (err) {
+    alert("删除失败：" + err.message);
+  }
+}
+
+
 // ================= 备忘录 + 主目标 =================
 
 export async function loadMemos() {
@@ -863,14 +977,35 @@ export async function addMemo() {
     const res = await fetch("/api/memos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, schedule: state.memoSchedule }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "添加失败");
     state.memos.push(data);
     state.memoDraft = "";
+    resetMemoSchedule();
+    await loadSchedule();
   } catch (err) {
     alert("添加失败：" + err.message);
+  }
+}
+
+export async function updateMemo(id, patch) {
+  try {
+    const res = await fetch(`/api/memos/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "保存失败");
+    const i = state.memos.findIndex((m) => m.id === id);
+    if (i !== -1) state.memos[i] = data;
+    await loadSchedule();
+    return data;
+  } catch (err) {
+    alert("保存失败：" + err.message);
+    return null;
   }
 }
 
@@ -880,6 +1015,7 @@ export async function delMemo(id) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "删除失败");
     state.memos = state.memos.filter((m) => m.id !== id);
+    await loadSchedule();
   } catch (err) {
     alert("删除失败：" + err.message);
   }

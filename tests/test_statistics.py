@@ -31,19 +31,23 @@ class SummaryApiTest(ApiTestCase):
 
     def test_month_summary(self):
         today = date_of(dt.datetime.now().astimezone())
+        yesterday = today - dt.timedelta(days=1)
         self._add(today, 3)
-        self._add(today - dt.timedelta(days=1), 2)
+        self._add(yesterday, 2)
         self.client.put("/api/notes", json={"day": today.isoformat(), "content": "感想"})
         r = self.client.get("/api/stats/summary?range=month")
         body = r.get_json()
-        self.assertEqual(body["total_days"], 2)
-        self.assertEqual(body["period_points"], 5)
-        self.assertEqual(body["current_streak"], 2)  # 今天+昨天
+
+        # range=month 是"本月 1 号 → 今天"：月初第一天跑测试时昨天属于上月，不该计入
+        in_month = yesterday.month == today.month and yesterday.year == today.year
+        self.assertEqual(body["total_days"], 2 if in_month else 1)
+        self.assertEqual(body["period_points"], 5 if in_month else 3)
+        self.assertEqual(body["current_streak"], 2)  # streak 是全局的，与 range 无关
         self.assertEqual(body["notes_days"], 1)
         # recent：今天与昨天 points>0，其余为 0
         by_date = {x["date"]: x for x in body["recent"]}
         self.assertEqual(by_date[today.isoformat()]["points"], 3)
-        self.assertEqual(by_date[(today - dt.timedelta(days=1)).isoformat()]["points"], 2)
+        self.assertEqual(by_date[yesterday.isoformat()]["points"], 2)
         zero_day = (today - dt.timedelta(days=5)).isoformat()
         self.assertEqual(by_date[zero_day]["points"], 0)
 

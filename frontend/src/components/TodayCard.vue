@@ -1,5 +1,12 @@
 <script setup>
 import { state, selectedLabel, lineText } from "../store";
+import { computed } from "vue";
+
+// 分位由后端返回（v2.7 起 80%），避免前后端写死两处
+const pctText = computed(() => {
+  const p = Number(state.line?.percentile);
+  return Number.isFinite(p) ? `${Math.round(p * 100)}%` : "80%";
+});
 </script>
 
 <template>
@@ -11,7 +18,7 @@ import { state, selectedLabel, lineText } from "../store";
       <span class="line-hint" v-if="state.line.active_days > 0">
         （近 {{ state.line.window_days }} 天 · {{ state.line.active_days }} 个打卡日
         <template v-if="state.line.method === 'trimmed'">· 剔最高最低各 {{ state.line.trimmed_low }} 天后</template>
-        取 40% 分位）
+        取 {{ pctText }} 分位）
       </span>
     </div>
   </section>

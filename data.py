@@ -72,9 +72,10 @@ def default_data() -> dict:
     return {
         "entries": [],       # 打卡记录
         "daily_notes": {},   # 每日感想：{ "YYYY-MM-DD": "文本" }，一天一篇
-        "memos": [],         # 备忘录：[{ "id": str, "text": str }]
+        "memos": [],         # 备忘录：[{ "id": str, "text": str, "schedule": {...} }]
         "main_goal": "",     # 置顶主目标（v1 仅展示用）
         "diary_tags": [],    # 日记标签池（档案级）：快捷填词库，存文本
+        "routines": [],      # 每日日常 + 点数规定（v2.7，档案级）：[{id,start,end,text,points,days,enabled}]
     }
 
 

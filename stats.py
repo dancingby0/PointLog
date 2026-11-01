@@ -1,9 +1,12 @@
 """点数线统计纯函数（无 Flask 依赖，可独立测试）。
 
-点数线 = 40% 分位数，剔极值版：
+点数线 = 分位数，剔极值版（v2.7 起分位从 40% 提高到 80%，见 P 参数）：
 1. 样本取最近窗口内"打过卡的天"的点数（0 分天不进样本）
-2. 有效天数 ≤ 10 → 直接取 40% 分位数
-3. 有效天数 > 10 → 各剔除点数最低/最高 10% 的天，剩余再取 40% 分位数
+2. 有效天数 ≤ 10 → 直接取 80% 分位数
+3. 有效天数 > 10 → 各剔除点数最低/最高 10% 的天，剩余再取 80% 分位数
+
+为什么是 80%（而不是中位数或 40%）：40% 偏低，只要不摆烂就"达标"，激励意义弱；
+80% 表示"接近你状态较好时的水平"，比最高值稳、又比中位数有挑战性。
 """
 
 import math
@@ -26,10 +29,13 @@ def percentile(values: list, p: float) -> float:
     return s[low] + (s[high] - s[low]) * frac
 
 
+BASELINE_PERCENTILE = 0.80      # 点数线分位（v2.7 起 40% → 80%）
+
+
 def calc_baseline(
     points_in_window: list,
     trim_ratio: float = 0.10,
-    p: float = 0.40,
+    p: float = BASELINE_PERCENTILE,
     small_n: int = 10,
 ) -> dict:
     """计算点数线。
@@ -37,7 +43,7 @@ def calc_baseline(
     参数：
         points_in_window: 最近窗口内"每天的点数"列表（可能含 0），顺序不限。
         trim_ratio: 各端剔除比例（0.10 = 各 10%）。
-        p: 分位数（0.40 = 40%）。
+        p: 分位数（默认 0.80 = 80%）。
         small_n: 有效天数小于等于该值时不做剔除。
 
     返回：含 baseline 与计算过程（便于前端展示/调试）。
@@ -48,6 +54,7 @@ def calc_baseline(
     if n == 0:
         return {
             "baseline": 0.0,
+            "percentile": p,
             "method": "no_data",
             "window_days": len(points_in_window),
             "active_days": 0,
@@ -71,6 +78,7 @@ def calc_baseline(
 
     return {
         "baseline": round(percentile(values, p), 2),
+        "percentile": p,                 # 前端据此显示"80% 分位"，改值不用改前端
         "method": method,
         "window_days": len(points_in_window),
         "active_days": n,
