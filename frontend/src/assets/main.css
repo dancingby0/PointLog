@@ -704,6 +704,19 @@ button.ghost.tiny { padding: 2px 8px; font-size: 12px; }
 }
 .rem-text { flex: 1; }
 .rem-when { font-size: 12px; white-space: nowrap; }
+
+/* ---- 专注统计（v2.8） ---- */
+.focus-labels { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.focus-label-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.focus-label-name { min-width: 90px; color: var(--text); }
+.focus-bar {
+  flex: 1; height: 8px; background: #eef0f3; border-radius: 999px; overflow: hidden;
+}
+.focus-bar-fill { display: block; height: 100%; background: #6366f1; border-radius: 999px; }
+.focus-label-time { min-width: 56px; text-align: right; color: var(--muted);
+  font-variant-numeric: tabular-nums; }
+.focus-sessions h3 { font-size: 14px; margin: 0; }
+
 .routine-reminder.expired .rem-when { color: var(--danger); }
 
 /* 备忘：时间范围编辑器 + 过期标红 */

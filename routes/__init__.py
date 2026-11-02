@@ -14,6 +14,7 @@
 - routes/accounts.py  本地账号 API（v2.3）
 - routes/activity.py  活动数据 API（v2.6，从本机 ActivityWatch 拉取桌面活动）
 - routes/schedule.py  每日日常 + 点数标准 API（v2.7，档案级，两段独立文本）
+- routes/focus.py     专注会话 API（v2.8，桌面计时器上传 + 点数系统统计）
 """
 
 from . import (
@@ -23,6 +24,7 @@ from . import (
     days,
     entries,
     export,
+    focus,
     memos,
     notes,
     pages,
@@ -47,3 +49,4 @@ def register_blueprints(app):
     app.register_blueprint(accounts.bp)
     app.register_blueprint(activity.bp)
     app.register_blueprint(schedule.bp)
+    app.register_blueprint(focus.bp)

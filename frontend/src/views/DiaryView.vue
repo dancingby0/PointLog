@@ -6,6 +6,7 @@ import DayPicker from "../components/DayPicker.vue";
 import ContribCalendar from "../components/ContribCalendar.vue";
 import TextBlockCard from "../components/TextBlockCard.vue";
 import ReminderCard from "../components/ReminderCard.vue";
+import FocusCard from "../components/FocusCard.vue";
 import EntryForm from "../components/EntryForm.vue";
 import EntryList from "../components/EntryList.vue";
 import EntryExportCard from "../components/EntryExportCard.vue";
@@ -45,6 +46,8 @@ import MemoCard from "../components/MemoCard.vue";
       empty-text="还没有写点数标准，点「编辑」写一段（可换行）。" />
 
     <ReminderCard />
+
+    <FocusCard />
 
     <EntryForm />
     <EntryList />

@@ -58,6 +58,9 @@ export const state = reactive({
   dailyRoutine: { text: "", lines: 0, chars: 0, empty: true },
   pointRules: { text: "", lines: 0, chars: 0, empty: true },
   todayView: null,         // 某天的展示内容（两段文本 + 当天生效的备忘提醒）
+  // 专注（v2.8，计时器上传的会话与其统计）
+  focusStats: null,        // 今日/累计时长、天数、按标签分布
+  focusSessions: [],       // 最近会话（可上传为打卡）
   mainGoal: "",
   goalDraft: "",
   goalEditing: false,
@@ -329,6 +332,8 @@ export function resetForProfileChange() {
   state.dailyRoutine = { text: "", lines: 0, chars: 0, empty: true };
   state.pointRules = { text: "", lines: 0, chars: 0, empty: true };
   state.todayView = null;
+  state.focusStats = null;
+  state.focusSessions = [];
   state.activityStatus = null;
   state.activityDay = null;
   state.activityDays = [];
@@ -491,6 +496,8 @@ export async function loadAll() {
     await loadCalendar();
     await loadMemos();
     await loadLine();
+    await loadFocusStats();
+    await loadFocusSessions();
     const target = state.days.find((d) => d.is_today) || state.days[0];
     await selectDay(target ? target.date : todayStr());
   } catch (err) {
@@ -943,7 +950,66 @@ export async function refreshReminders() {
 }
 
 
-// ================= 备忘录 + 主目标 =================
+// ================= 专注会话（v2.8，计时器上传） =================
+
+export async function loadFocusStats() {
+  try {
+    const res = await fetch("/api/focus/stats");
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载专注统计失败");
+    state.focusStats = data;
+  } catch (err) {
+    console.error(err);
+    state.focusStats = null;
+  }
+}
+
+export async function loadFocusSessions(limit = 10) {
+  try {
+    const res = await fetch(`/api/focus/sessions?limit=${limit}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "加载专注记录失败");
+    state.focusSessions = data.sessions || [];
+  } catch (err) {
+    console.error(err);
+    state.focusSessions = [];
+  }
+}
+
+export async function uploadFocusSession(id, patch = {}) {
+  try {
+    const res = await fetch(`/api/focus/sessions/${id}/upload`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "上传失败");
+    await loadFocusStats();
+    await loadFocusSessions();
+    await loadEntries();          // 打卡列表里立刻能看到新记录
+    await loadDays();
+    await loadLine();
+    return data;
+  } catch (err) {
+    alert("上传失败：" + err.message);
+    return null;
+  }
+}
+
+export async function delFocusSession(id) {
+  try {
+    const res = await fetch(`/api/focus/sessions/${id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "删除失败");
+    state.focusSessions = state.focusSessions.filter((s) => s.id !== id);
+    await loadFocusStats();
+  } catch (err) {
+    alert("删除失败：" + err.message);
+  }
+}
+
+
 
 export async function loadMemos() {
   try {

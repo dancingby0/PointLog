@@ -78,6 +78,7 @@ def default_data() -> dict:
         # v2.7：两段纯文本，各自独立（不互相依赖）
         "daily_routine": "",  # 每日日常（多行文字；显示在点数线下方）
         "point_rules": "",    # 点数标准（多行文字；显示在每日日常下方）
+        "focus_sessions": [],  # 专注会话（v2.8，计时器上传；结构见 focus.py）
     }
 
 
