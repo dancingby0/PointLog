@@ -38,6 +38,42 @@ DEFAULT_BASE = "http://127.0.0.1:5000"
 POLL_MS = 1000
 SINGLE_INSTANCE_PORT = 5091        # 单实例锁：本地回环端口，被占用＝已有计时器在跑
 
+
+class ApiResult(dict):
+    """接口返回体 + 状态码，便于区分"未登录(409)"与其它错误。"""
+
+    @property
+    def status(self):
+        return self.get("_status")
+
+
+def http_json(url: str, method: str = "GET", body=None, timeout: float = 5.0):
+    """极简 JSON 请求；返回 (ok, data)。data 里带 _status（HTTP 状态码）。"""
+    data = None
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            payload = json.loads(raw) if raw else {}
+            payload["_status"] = resp.status
+            return True, ApiResult(payload)
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            payload = json.loads(exc.read() or b"{}")
+            detail = payload.get("error", "")
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+        payload["error"] = detail or f"HTTP {exc.code}"
+        payload["_status"] = exc.code
+        return False, ApiResult(payload)
+    except OSError as exc:
+        return False, ApiResult({"error": f"连不上 PointLog（{exc}）", "_status": None})
+
 BG = "#1f2430"                     # 面板底色
 BORDER = "#3a4256"
 FG = "#e6e9f0"
@@ -368,7 +404,11 @@ class FocusTimer:
         ok, data = http_json(f"{self.base}/api/focus/sessions", "POST",
                              {"label": label, "points": self.points})
         if not ok:
-            self.status.set(f"开始失败：{data.get('error')}")
+            if data.get("need_login"):
+                self.status.set("需要先登录：请在浏览器里打开 PointLog 并登录账号")
+                self._apply_view("full")          # 展开窗口，避免提示被藏在小球里
+            else:
+                self.status.set(f"开始失败：{data.get('error')}")
             return
         self.session = data
         self.elapsed = 0

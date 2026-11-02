@@ -48,6 +48,9 @@ class FocusSessionApiTest(ApiTestCase):
         self.assertEqual(self.client.post(f"/api/focus/sessions/{sid}/bogus").status_code, 400)
 
     def test_starting_new_session_ends_previous(self):
+        config.CURRENT_ACCOUNT = "someone"
+        config.CURRENT_PROFILE = "p1"
+        data.profile_dir("p1")
         first = self.client.post("/api/focus/sessions", json={"label": "旧"}).get_json()["id"]
         self.client.post("/api/focus/sessions", json={"label": "新"})
         rows = self.client.get("/api/focus/sessions").get_json()["sessions"]
@@ -166,6 +169,126 @@ class FocusStatsApiTest(ApiTestCase):
         sid = self.client.post("/api/focus/sessions", json={"label": "x"}).get_json()["id"]
         self.assertEqual(self.client.delete(f"/api/focus/sessions/{sid}").status_code, 200)
         self.assertEqual(self.client.get("/api/focus/sessions").get_json()["sessions"], [])
+
+
+class FocusCrossProfileTest(ApiTestCase):
+    """回归：未登录时开始计时（会话落在 default），登录后上传不应 404。
+
+    真实故障：账号有 PIN 时服务启动不会自动登录，计时器先开始的会话写进
+    data/default/data.json；用户在浏览器输 PIN 登录后当前档案变成账号下的档案，
+    再点上传就 404（会话不在"当前档案"里）。
+    """
+
+    def setUp(self):
+        super().setUp()
+        # 造一个带 PIN 的账号（模拟真实环境：不会自动登录）
+        self._old_account = config.CURRENT_ACCOUNT
+        self._old_profile = config.CURRENT_PROFILE
+        data.account_dir("pinner")
+        meta = data.load_accounts_meta()
+        meta["accounts"] = ["pinner"]
+        meta["current"] = "pinner"
+        meta["auto_login"] = True
+        data.save_accounts_meta(meta)
+        data.save_account_settings("pinner", {"pin_hash": "x"})
+        # 未登录状态：会话会落到无账号的 default
+        config.CURRENT_ACCOUNT = ""
+        config.CURRENT_PROFILE = "default"
+
+    def tearDown(self):
+        config.CURRENT_ACCOUNT = self._old_account
+        config.CURRENT_PROFILE = self._old_profile
+        super().tearDown()
+
+    def _start_and_switch(self, minutes=20):
+        """登录后建会话并结束，再把会话移到根 default 模拟"历史遗留"。"""
+        config.CURRENT_ACCOUNT = "pinner"
+        config.CURRENT_PROFILE = "painted"
+        created = self.client.post("/api/focus/sessions", json={"label": "画画"})
+        self.assertEqual(created.status_code, 201)
+        sid = created.get_json()["id"]
+        self.client.post(f"/api/focus/sessions/{sid}/stop")
+
+        # 把时长改成 20 分钟（避免测试等真实时间）
+        d = data.load("painted")
+        past = dt.datetime.now().astimezone() - dt.timedelta(minutes=minutes)
+        for s in d["focus_sessions"]:
+            if str(s.get("id")) == sid:
+                s["segments"] = [
+                    {"start": past.isoformat(timespec="seconds"),
+                     "end": dt.datetime.now().astimezone().isoformat(timespec="seconds")}]
+        data.save("painted", d)
+
+        # 挪到根目录 default，模拟早期版本"未登录时计时"留下的数据
+        legacy = data.DATA_DIR / "default" / "data.json"
+        moved = next(s for s in d["focus_sessions"] if str(s.get("id")) == sid)
+        data.save_path(legacy, {**data.default_data(), "focus_sessions": [moved]})
+        d["focus_sessions"] = [s for s in d["focus_sessions"] if str(s.get("id")) != sid]
+        data.save("painted", d)
+        return sid
+
+    def test_start_is_rejected_when_not_logged_in(self):
+        """未登录（账号有 PIN）时不许开始计时：宁可报错也不写进看不见的目录。"""
+        res = self.client.post("/api/focus/sessions", json={"label": "画画"})
+        self.assertEqual(res.status_code, 409)
+        self.assertTrue(res.get_json()["need_login"])
+        self.assertIn("登录", res.get_json()["error"])
+        # 根目录 default 不该被写入
+        legacy = data.DATA_DIR / "default" / "data.json"
+        self.assertFalse(legacy.exists())
+
+    def test_operations_work_after_manual_login(self):
+        """用户登录后再计时 → 一切正常（这是正常运行路径）。"""
+        config.CURRENT_ACCOUNT = "pinner"
+        config.CURRENT_PROFILE = "painted"
+        res = self.client.post("/api/focus/sessions", json={"label": "画画"})
+        self.assertEqual(res.status_code, 201)
+        sid = res.get_json()["id"]
+        self.assertEqual(self.client.post(f"/api/focus/sessions/{sid}/stop").status_code, 200)
+        self.assertEqual(self.client.delete(f"/api/focus/sessions/{sid}").status_code, 200)
+
+    def test_legacy_session_in_root_default_is_still_reachable(self):
+        """历史遗留：早期版本写进根目录 default 的会话，登录后仍能找到并上传。"""
+        legacy = data.DATA_DIR / "default" / "data.json"
+        now = dt.datetime.now().astimezone()
+        start = now - dt.timedelta(minutes=30)
+        data.save_path(legacy, {**data.default_data(), "focus_sessions": [{
+            "id": "legacy1", "label": "画画", "state": "stopped", "points": 1,
+            "segments": [{"start": start.isoformat(timespec="seconds"),
+                          "end": now.isoformat(timespec="seconds")}],
+            "created_at": start.isoformat(timespec="seconds"), "entry_id": None,
+        }]})
+
+        data.profile_dir("painted")
+        config.CURRENT_ACCOUNT = "pinner"
+        config.CURRENT_PROFILE = "painted"
+
+        # current 只返回运行中的会话，这里已 stop → 应为空（但统计仍可见）
+        self.assertIsNone(self.client.get("/api/focus/current").get_json()["session"])
+        stats = self.client.get("/api/focus/stats").get_json()
+        self.assertEqual(stats["sessions"], 1)
+
+        res = self.client.post("/api/focus/sessions/legacy1/upload", json={})
+        self.assertEqual(res.status_code, 200, msg=res.get_json())
+        self.assertEqual(data.load_path(legacy)["entries"][0]["content"], "专注 30m · 画画")
+        self.assertEqual(data.load("painted")["entries"], [])
+
+
+    def test_current_and_stats_see_other_profiles(self):
+        sid = self._start_and_switch()
+        cur = self.client.get("/api/focus/current").get_json()
+        # 该会话已 stop → current 为空；但 stats 仍应统计到它
+        self.assertIsNone(cur["session"])
+
+        stats = self.client.get("/api/focus/stats").get_json()
+        self.assertEqual(stats["sessions"], 1)            # 根 default 里的会话也被统计
+        self.assertIn("画画", [r["label"] for r in stats["by_label"]])
+
+    def test_delete_crosses_profiles(self):
+        sid = self._start_and_switch()
+        self.assertEqual(self.client.delete(f"/api/focus/sessions/{sid}").status_code, 200)
+        legacy = data.DATA_DIR / "default" / "data.json"
+        self.assertEqual(data.load_path(legacy)["focus_sessions"], [])
 
 
 if __name__ == "__main__":

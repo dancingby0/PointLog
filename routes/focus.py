@@ -37,12 +37,91 @@ def _now() -> dt.datetime:
     return dt.datetime.now().astimezone()
 
 
-def _load():
-    # 桌面计时器可能先于浏览器发请求：先补做自动登录，避免写进 default 档案
-    accounts.ensure_auto_login()
-    d = data.load(config.CURRENT_PROFILE)
+def _load(profile: str | None = None):
+    """读取会话所在档案；profile 为空时用当前档案。"""
+    if profile is None:
+        profile = config.CURRENT_PROFILE
+    d = data.load(profile)
     d.setdefault("focus_sessions", [])
     return d
+
+
+def _require_profile():
+    """确保有可用的档案；未登录且账号有 PIN 时返回错误信息。
+
+    为什么必须拦：账号带 PIN 时服务启动不会自动登录，此时 ``CURRENT_PROFILE`` 还是
+    ``default``，数据会写进**无账号归属**的根目录 ``data/default``——
+    用户在浏览器输 PIN 登录后看到的是 ``data/<账号>/<档案>``，两边不是同一个文件，
+    于是出现"计时器显示已计时、界面里查不到/上传 404"。
+    宁可让计时器明确提示"请先在浏览器登录"，也不要写进用户看不见的地方。
+    """
+    if config.CURRENT_ACCOUNT:
+        return None
+    auto = accounts.ensure_auto_login()
+    if auto:
+        return None
+    meta = data.load_accounts_meta()
+    if meta.get("accounts"):
+        return "尚未登录 PointLog：请先在浏览器里打开并登录账号（账号有 PIN 时不会自动登录）"
+    return None
+
+
+def _legacy_default_path():
+    """无账号归属的旧布局档案路径：<data>/default/data.json（可能不存在）。"""
+    return data.DATA_DIR / "default" / "data.json"
+
+
+def _candidate_stores() -> list[tuple[str, str, object]]:
+    """可能存着会话的位置：[(kind, key, label)]，kind 为 "profile" 或 "path"。
+
+    顺序＝优先级：当前档案 → 账号内其它档案 → 无账号的 default（旧布局）。
+    后者的必要性：账号有 PIN 时服务启动不会自动登录，计时器先开始的会话会落在
+    ``data/default/data.json``；而登录后 ``profile_dir("default")`` 指向的是
+    ``data/<账号>/default``，两者不是同一个文件。
+    """
+    stores = []
+    seen = []
+
+    def add(kind, key):
+        label = key if kind == "profile" else str(key)
+        if label not in seen:
+            seen.append(label)
+            stores.append((kind, key, label))
+
+    add("profile", config.CURRENT_PROFILE)
+    if config.CURRENT_ACCOUNT:
+        for name in data.account_profile_dirs(config.CURRENT_ACCOUNT):
+            add("profile", name)
+    legacy = _legacy_default_path()
+    if legacy.exists():
+        add("path", legacy)
+    return stores
+
+
+def _read_store(kind: str, key) -> dict:
+    d = data.load(key) if kind == "profile" else data.load_path(key)
+    d.setdefault("focus_sessions", [])
+    return d
+
+
+def _write_store(kind: str, key, payload: dict) -> None:
+    if kind == "profile":
+        data.save(key, payload)
+    else:
+        data.save_path(key, payload)
+
+
+def _locate(session_id: str):
+    """按 id 找会话：返回 (store, data, session) 或 (None, None, None)。"""
+    for kind, key, _label in _candidate_stores():
+        try:
+            d = _read_store(kind, key)
+        except (ValueError, OSError):
+            continue
+        for raw in d["focus_sessions"]:
+            if str(raw.get("id")) == session_id:
+                return (kind, key), d, raw
+    return None, None, None
 
 
 def _find(d: dict, session_id: str):
@@ -52,17 +131,27 @@ def _find(d: dict, session_id: str):
     return None
 
 
-def _save_session(d: dict, sess: dict) -> None:
-    """整条替换（normalize 后的结构），保持列表按创建时间升序、总量有上限。"""
+def _save_session(d: dict, sess: dict, store=None) -> str:
+    """整条替换（normalize 后的结构），保持列表按创建时间升序、总量有上限。
+
+    store 为空时写回"当前档案"；返回实际写入的位置描述（便于接口回报）。
+    """
     rows = [s for s in d["focus_sessions"] if str(s.get("id")) != sess["id"]]
     rows.append(sess)
     rows.sort(key=lambda s: str(s.get("created_at") or ""))
     d["focus_sessions"] = rows[-MAX_SESSIONS:]
-    data.save(config.CURRENT_PROFILE, d)
+    if store is None:
+        store = ("profile", config.CURRENT_PROFILE)
+    kind, key = store
+    _write_store(kind, key, d)
+    return key if kind == "profile" else str(key)
 
 
 @bp.post("/sessions")
 def create_session():
+    err = _require_profile()
+    if err:
+        return jsonify({"error": err, "need_login": True}), 409
     body = request.get_json(silent=True) or {}
     label = str(body.get("label") or "").strip()
     if len(label) > 40:
@@ -85,26 +174,29 @@ def change_state(session_id: str, action: str):
     """pause / resume / stop 三合一（幂等：状态不符就原样返回）。"""
     if action not in ("pause", "resume", "stop"):
         return jsonify({"error": "action 应为 pause/resume/stop"}), 400
-    d = _load()
-    raw = _find(d, session_id)
+    profile, d, raw = _locate(session_id)
     if raw is None:
         return jsonify({"error": "会话不存在"}), 404
     now = _now()
     updated = getattr(focus, action)(raw, now)
     if not updated:
         return jsonify({"error": "会话数据异常"}), 400
-    _save_session(d, updated)
+    where = _save_session(d, updated, profile)
     secs = focus.total_sec(updated, now)
     return jsonify({**updated, "elapsed_sec": int(secs),
-                    "elapsed_text": focus.fmt_duration(secs)})
+                    "elapsed_text": focus.fmt_duration(secs),
+                    "profile": where})
 
 
 
 @bp.post("/sessions/<session_id>/upload")
 def upload_session(session_id: str):
-    """把会话写成一条打卡记录（幂等：已上传则更新那条）。"""
-    d = _load()
-    raw = _find(d, session_id)
+    """把会话写成一条打卡记录（幂等：已上传则更新那条）。
+
+    打卡记录写进**会话所在的那个档案**（而不是"当前档案"），
+    这样"未登录时先计时、之后登录再上传"也不会写错地方。
+    """
+    profile, d, raw = _locate(session_id)
     if raw is None:
         return jsonify({"error": "会话不存在"}), 404
     sess = focus.normalize_session(raw)
@@ -121,7 +213,6 @@ def upload_session(session_id: str):
         return jsonify({"error": "专注不足 1 分钟，暂不能上传"}), 400
 
     label = entry["category"][0] if entry["category"] else ""
-    d = data.load(config.CURRENT_PROFILE)
     existing = None
     if sess.get("entry_id"):
         existing = next((e for e in d["entries"] if str(e.get("id")) == sess["entry_id"]), None)
@@ -134,39 +225,58 @@ def upload_session(session_id: str):
         d["entries"].append({"id": entry_id, **entry})
     if label and label not in d["diary_tags"]:     # 标签顺手入池，方便下次点选
         d["diary_tags"].append(label)
-    data.save(config.CURRENT_PROFILE, d)
 
     sess["entry_id"] = entry_id
     sess["uploaded_at"] = now.isoformat(timespec="seconds")
-    _save_session(_load(), sess)
-    return jsonify({"session": sess, "entry": {**entry, "id": entry_id}})
+    where = _save_session(d, sess, profile)        # 与打卡记录写在同一处
+    return jsonify({"session": sess, "entry": {**entry, "id": entry_id},
+                    "profile": where})
 
 
 @bp.get("/current")
 def current():
-    """当前计时器状态（供悬浮窗轮询）：只返回运行/暂停中的会话 + 实时时长。"""
-    d = _load()
-    live = None
-    for raw in d["focus_sessions"]:
-        sess = focus.normalize_session(raw)
-        if sess and sess["state"] in ("running", "paused"):
-            live = sess
+    """当前计时器状态（供悬浮窗轮询）：只返回运行/暂停中的会话 + 实时时长。
+
+    会遍历候选档案，所以"未登录时开始的计时"在登录后仍能被找到（响应里带 profile）。
+    """
     now = _now()
+    live = None
+    live_store = None
+    for kind, key, label in _candidate_stores():
+        try:
+            d = _read_store(kind, key)
+        except (ValueError, OSError):
+            continue
+        for raw in d["focus_sessions"]:
+            sess = focus.normalize_session(raw)
+            if sess and sess["state"] in ("running", "paused"):
+                live, live_store = sess, label
     if not live:
-        return jsonify({"session": None, "elapsed_sec": 0, "elapsed_text": "0m"})
+        return jsonify({"session": None, "elapsed_sec": 0, "elapsed_text": "0m",
+                        "profile": config.CURRENT_PROFILE})
     secs = focus.total_sec(live, now)
     return jsonify({"session": live, "elapsed_sec": int(secs),
-                    "elapsed_text": focus.fmt_duration(secs)})
+                    "elapsed_text": focus.fmt_duration(secs),
+                    "profile": live_store})
 
 
 @bp.get("/stats")
 def stats_endpoint():
-    """点数系统里的专注统计：今日 / 累计时长、累计天数、按标签分布。"""
-    d = _load()
+    """点数系统里的专注统计：今日 / 累计时长、累计天数、按标签分布。
+
+    汇总"当前档案 + 账号内其它档案 + default"里的会话，覆盖"先计时、后登录"的情况。
+    """
     now = _now()
     today = utils.date_of(now)
-    summary = focus.aggregate(d["focus_sessions"], today, now)
+    rows = []
+    for kind, key, _label in _candidate_stores():
+        try:
+            rows.extend(_read_store(kind, key)["focus_sessions"])
+        except (ValueError, OSError):
+            continue
+    summary = focus.aggregate(rows, today, now)
     summary["day"] = today.isoformat()
+    summary["profile"] = config.CURRENT_PROFILE
     return jsonify(summary)
 
 
@@ -176,27 +286,32 @@ def list_sessions():
         limit = max(1, min(int(request.args.get("limit", 20)), 100))
     except ValueError:
         return jsonify({"error": "limit 应为整数"}), 400
-    d = _load()
     now = _now()
     rows = []
-    for raw in sorted(d["focus_sessions"], key=lambda s: str(s.get("created_at") or ""),
-                      reverse=True)[:limit]:
-        sess = focus.normalize_session(raw)
-        if not sess:
+    for kind, key, label in _candidate_stores():
+        try:
+            sessions = _read_store(kind, key)["focus_sessions"]
+        except (ValueError, OSError):
             continue
-        secs = focus.total_sec(sess, now)
-        rows.append({**sess, "elapsed_sec": int(secs),
-                     "elapsed_text": focus.fmt_duration(secs),
-                     "uploaded": bool(sess.get("entry_id"))})
-    return jsonify({"sessions": rows})
+        for raw in sessions:
+            sess = focus.normalize_session(raw)
+            if not sess:
+                continue
+            secs = focus.total_sec(sess, now)
+            rows.append({**sess, "profile": label, "elapsed_sec": int(secs),
+                         "elapsed_text": focus.fmt_duration(secs),
+                         "uploaded": bool(sess.get("entry_id"))})
+    rows.sort(key=lambda s: str(s.get("created_at") or ""), reverse=True)
+    return jsonify({"sessions": rows[:limit]})
 
 
 @bp.delete("/sessions/<session_id>")
 def delete_session(session_id: str):
-    d = _load()
-    before = len(d["focus_sessions"])
-    d["focus_sessions"] = [s for s in d["focus_sessions"] if str(s.get("id")) != session_id]
-    if len(d["focus_sessions"]) == before:
+    store, d, raw = _locate(session_id)
+    if raw is None:
         return jsonify({"error": "会话不存在"}), 404
-    data.save(config.CURRENT_PROFILE, d)
+    d["focus_sessions"] = [s for s in d["focus_sessions"]
+                           if str(s.get("id")) != session_id]
+    kind, key = store
+    _write_store(kind, key, d)
     return jsonify({"ok": True})

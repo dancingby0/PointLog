@@ -172,6 +172,43 @@ def new_id() -> str:
     return str(int(time.time() * 1000))
 
 
+def load_path(path) -> dict:
+    """按**绝对路径**读取档案式 data.json（缺字段补默认）。
+
+    用于"没有账号归属"的旧布局文件（例如服务未登录时桌面计时器写下的
+    ``data/default/data.json``）：这类文件不能通过 ``profile_dir()`` 定位，
+    因为一旦当前账号存在，``profile_dir("default")`` 会指向账号下的 default。
+    """
+    path = Path(path)
+    base = default_data()
+    if not path.exists():
+        return base
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return base
+    if not isinstance(raw, dict):
+        return base
+    for key in base:
+        raw.setdefault(key, copy.deepcopy(base[key]))
+    if not isinstance(raw.get("daily_notes"), dict):
+        raw["daily_notes"] = {}
+    return raw
+
+
+def save_path(path, payload: dict) -> None:
+    """按绝对路径原子写（先 .tmp 再替换）。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
+
+
 # ---------- 活动数据：档案级（v2.6，来自 ActivityWatch） ----------
 # 为什么要独立文件而不是塞进 data.json：
 # 1) data.json 是"全量读—改—写"，活动摘要是几百 KB 的派生数据，混进去会让每次打卡都变慢；
