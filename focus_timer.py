@@ -1,18 +1,25 @@
 """PointLog 专注计时器（桌面悬浮窗，Windows，纯标准库 tkinter）。
 
-特点
+三种形态（参考 patina 的收起方式）：
 
-- **悬浮置顶**：无边框、可拖动、始终置顶。关窗＝退出（会提示是否结束正在跑的会话）。
-- **正计时 + 暂停/继续/结束**：暂停后时长不再增长（中断时间不算专注）。
-- **标签**：点一下就用（画画 / 学习日语 / 学习英语 / 学数学 / 科研工作），也能自己输入。
-- **可选上传**：默认**不上传**。勾"结束后自动上传"或手动点「上传」才写打卡记录，
-  于是点数线 / 连续天数不会被计时器污染。服务端保证幂等（重复上传只更新那条记录）。
-- **本地优先**：本地每秒自增显示，不依赖网络；上传失败会提示、会话仍在服务端。
+- **小球**：屏幕上一个小圆点，只显示"已专注 Xm"，最不打扰；单击展开成长条。
+- **长条**：时间 + 标签 + 「详情」按钮；单击长条本体或点「详情」进入完整窗口。
+- **完整**：时间、开始/暂停/继续/结束、标签快捷点选与自定义、上传、状态提示。
+
+``Esc`` 逐级退回（完整 → 长条 → 小球 → 退出）；按住任意处可拖动，拖动不会误触发切换。
+
+其他能力
+
+- 正计时 + 暂停/继续/结束；暂停期间时长不增长（中断不算专注）。
+- 标签来自档案的类别池（**可在设置页自行增删改名**），也能临时输入。
+- 上传是显式动作（默认不上传），服务端保证幂等；服务不可用也能正常计时。
+- 单实例：重复启动只保留一个悬浮窗。
 
 用法
 
     python focus_timer.py                       # 连默认服务 http://127.0.0.1:5000
     python focus_timer.py --points 2            # 上传时用 2 点
+    python focus_timer.py --view full           # 启动即展开完整窗口
     python focus_timer.py --list-labels         # 只打印当前档案的类别池
 
 依赖：仅标准库（tkinter / urllib / json），无需 pip install。
@@ -29,8 +36,15 @@ from urllib.parse import quote
 
 DEFAULT_BASE = "http://127.0.0.1:5000"
 POLL_MS = 1000
-DEFAULT_LABELS = ["画画", "学习日语", "学习英语", "学数学", "科研工作"]
 SINGLE_INSTANCE_PORT = 5091        # 单实例锁：本地回环端口，被占用＝已有计时器在跑
+
+BG = "#1f2430"                     # 面板底色
+BORDER = "#3a4256"
+FG = "#e6e9f0"
+MUTED = "#8b93a7"
+ACCENT_TEXT = "#6ee7b7"
+CHIP_BG = "#2b3242"
+VIEWS = ("ball", "bar", "full")
 
 
 def acquire_instance_lock():
@@ -48,7 +62,6 @@ def acquire_instance_lock():
         sock.close()
         return None
     return sock                      # 故意不 close：出了作用域也由进程生命周期决定
-
 
 
 def http_json(url: str, method: str = "GET", body=None, timeout: float = 5.0):
@@ -74,24 +87,52 @@ def http_json(url: str, method: str = "GET", body=None, timeout: float = 5.0):
         return False, {"error": f"连不上 PointLog（{exc}）"}
 
 
+def fmt_clock(seconds: int) -> str:
+    """秒 → HH:MM:SS（完整窗口用）。"""
+    total = max(0, int(seconds))
+    return f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}"
+
+
+def fmt_short(seconds: int) -> str:
+    """秒 → "1h23m" / "45m"（小球与长条用，省地方）。"""
+    total = int(round(max(0, seconds) / 60.0))
+    if total <= 0:
+        return "0m"
+    h, m = divmod(total, 60)
+    return f"{h}h{m:02d}m" if h else f"{m}m"
+
+
+
+BG = "#1f2430"                     # 面板底色
+BORDER = "#3a4256"
+FG = "#e6e9f0"
+MUTED = "#8b93a7"
+ACCENT_TEXT = "#6ee7b7"
+CHIP_BG = "#2b3242"
+VIEWS = ("ball", "bar", "full")
+
 
 class FocusTimer:
     """悬浮计时器：界面 + 状态机（与服务端会话保持一致）。"""
 
     def __init__(self, base_url: str, points: float = 1, labels=None,
-                 wait_sec: float = 15.0):
+                 wait_sec: float = 15.0, view: str = "ball"):
         self.base = base_url.rstrip("/")
         self.points = points
-        self.labels = list(labels or DEFAULT_LABELS)
+        self.labels = list(labels or [])
         self.session = None          # 服务端返回的会话（含 id / state / segments）
         self.elapsed = 0             # 本地累计秒（显示用，与服务端在动作后对齐）
         self.label = ""
-        self._drag = (0, 0)
-        self._build_ui()
+        self._drag = None
+        self._press_at = None
+        self._moved = False
+        self._build_ui(view or "ball")
         if wait_sec > 0 and not self._server_ready(wait_sec):
             self.status.set("等不到 PointLog 服务；仍可计时，上传会失败")
+        else:
+            self._sync_labels()
 
-    # ---------- 服务探活 ----------
+    # ---------- 服务 ----------
 
     def _server_ready(self, timeout: float) -> bool:
         """launcher 会同时拉起本窗口，服务可能就差几百毫秒：先等一会儿再报"连不上"。"""
@@ -103,15 +144,22 @@ class FocusTimer:
             time.sleep(0.4)
         return False
 
+    def _sync_labels(self):
+        """从服务端重取类别池（用户在设置页增删/改名后，展开窗口即可看到最新）。"""
+        ok, data = http_json(f"{self.base}/api/tags/diary", timeout=2.0)
+        if ok and isinstance(data.get("tags"), list):
+            self.labels = list(data["tags"])
+            self._render_chips()
+
 
     # ---------- 界面 ----------
 
-    def _build_ui(self):
+    def _build_ui(self, view: str):
         self.root = tk.Tk()
         self.root.title("PointLog 专注计时")
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)                 # 无边框，更像悬浮窗
-        self.root.configure(bg="#1f2430")
+        self.root.configure(bg=BG)
         self.root.geometry("+80+80")
 
         # 注意：StringVar/BooleanVar 必须先有 root（tkinter 需要默认根窗口），
@@ -120,66 +168,152 @@ class FocusTimer:
         self.time_var = tk.StringVar(value="00:00:00")
         self.label_var = tk.StringVar(value="未选标签")
         self.auto_upload = tk.BooleanVar(value=False)
+        self.view = tk.StringVar(value="ball")
 
-        wrap = tk.Frame(self.root, bg="#1f2430", padx=12, pady=8)
-        wrap.pack()
+        self.frames = {}
+        self._build_ball()
+        self._build_bar()
+        self._build_full()
 
-        bar = tk.Frame(wrap, bg="#1f2430")
-        bar.pack(fill="x")
-        tk.Label(bar, text="专注", fg="#8b93a7", bg="#1f2430",
-                 font=("Segoe UI", 10)).pack(side="left")
-        tk.Button(bar, text="✕", command=self.quit, bd=0, bg="#1f2430", fg="#8b93a7",
-                  activebackground="#2b3242", activeforeground="#fff",
-                  font=("Segoe UI", 10), cursor="hand2").pack(side="right")
-        self.dot = tk.Label(bar, text="●", fg="#4b5563", bg="#1f2430", font=("Segoe UI", 10))
+        self.root.bind("<Escape>", lambda _e: self._on_escape())
+        self._apply_view(view)
+        self._refresh_buttons()
+        self._tick()
+
+    def _build_ball(self):
+        """小球：一个圆点 + 短短时长；单击展开成长条。"""
+        frame = tk.Frame(self.root, bg=BG)
+        self.ball = tk.Canvas(frame, width=58, height=58, bg=BG,
+                              highlightthickness=0, cursor="hand2")
+        self.ball.pack()
+        self._ring = self.ball.create_oval(4, 4, 54, 54, fill=CHIP_BG, outline=BORDER, width=2)
+        self._ring_text = self.ball.create_text(29, 29, text="0m", fill=FG,
+                                               font=("Segoe UI", 10, "bold"))
+        self._ring_dot = self.ball.create_oval(40, 8, 48, 16, fill="#4b5563", outline="")
+        self._bind_drag(self.ball, click=self._on_ball_click)
+        self.frames["ball"] = frame
+
+    def _build_bar(self):
+        """长条：时间 + 标签 + 「详情」按钮。"""
+        frame = tk.Frame(self.root, bg=BG, padx=10, pady=5)
+        self.bar_dot = tk.Label(frame, text="●", fg="#4b5563", bg=BG, font=("Segoe UI", 9))
+        self.bar_dot.pack(side="left")
+        self.bar_time = tk.Label(frame, textvariable=self.time_var, fg=FG, bg=BG,
+                                 font=("Consolas", 13, "bold"))
+        self.bar_time.pack(side="left", padx=(6, 0))
+        self.bar_label = tk.Label(frame, textvariable=self.label_var, fg=ACCENT_TEXT, bg=BG,
+                                  font=("Segoe UI", 9))
+        self.bar_label.pack(side="left", padx=(8, 10))
+        tk.Button(frame, text="详情", command=lambda: self._apply_view("full"), bd=0,
+                  bg=CHIP_BG, fg="#c7d2fe", activebackground="#3a4256",
+                  activeforeground="#fff", font=("Segoe UI", 8), padx=8, pady=1,
+                  cursor="hand2").pack(side="left")
+        tk.Button(frame, text="○", command=lambda: self._apply_view("ball"), bd=0,
+                  bg=BG, fg=MUTED, activebackground=CHIP_BG, activeforeground="#fff",
+                  font=("Segoe UI", 10), padx=4, cursor="hand2").pack(side="left", padx=(4, 0))
+        tk.Button(frame, text="✕", command=self.quit, bd=0, bg=BG, fg=MUTED,
+                  activebackground=CHIP_BG, activeforeground="#fff",
+                  font=("Segoe UI", 9), padx=4, cursor="hand2").pack(side="left")
+        self._bind_drag(frame)
+        for widget in (self.bar_dot, self.bar_time, self.bar_label):
+            self._bind_drag(widget)
+        self.frames["bar"] = frame
+
+
+    def _build_full(self):
+        """完整窗口：时间、四个按钮、标签 chip + 自定义输入、上传、状态。"""
+        wrap = tk.Frame(self.root, bg=BG, padx=12, pady=8)
+        self.frames["full"] = wrap
+
+        head = tk.Frame(wrap, bg=BG)
+        head.pack(fill="x")
+        tk.Label(head, text="专注", fg=MUTED, bg=BG, font=("Segoe UI", 10)).pack(side="left")
+        for text, handler in (("✕", self.quit),
+                              ("▭", lambda: self._apply_view("bar")),
+                              ("○", lambda: self._apply_view("ball"))):
+            tk.Button(head, text=text, command=handler, bd=0, bg=BG, fg=MUTED,
+                      activebackground=CHIP_BG, activeforeground="#fff",
+                      font=("Segoe UI", 10), padx=4, cursor="hand2",
+                      ).pack(side="right", padx=(2, 0))
+        self.dot = tk.Label(head, text="●", fg="#4b5563", bg=BG, font=("Segoe UI", 10))
         self.dot.pack(side="right", padx=6)
 
-        tk.Label(wrap, textvariable=self.time_var, fg="#e6e9f0", bg="#1f2430",
+        tk.Label(wrap, textvariable=self.time_var, fg=FG, bg=BG,
                  font=("Consolas", 30, "bold")).pack(pady=(2, 0))
-        tk.Label(wrap, textvariable=self.label_var, fg="#6ee7b7", bg="#1f2430",
+        tk.Label(wrap, textvariable=self.label_var, fg=ACCENT_TEXT, bg=BG,
                  font=("Segoe UI", 11)).pack()
 
-        self.row = tk.Frame(wrap, bg="#1f2430")
+        self.row = tk.Frame(wrap, bg=BG)
         self.row.pack(pady=8)
         self.btn_start = self._button(self.row, "开始", self.start, "#10b981")
         self.btn_pause = self._button(self.row, "暂停", self.pause, "#f59e0b")
         self.btn_resume = self._button(self.row, "继续", self.resume, "#3b82f6")
         self.btn_stop = self._button(self.row, "结束", self.stop, "#ef4444")
 
-        tags = tk.Frame(wrap, bg="#1f2430")
-        tags.pack(fill="x")
-        for text in self.labels[:6]:
-            chip = tk.Label(tags, text=text, fg="#c7d2fe", bg="#2b3242", padx=6, pady=2,
-                            cursor="hand2", font=("Segoe UI", 9))
-            chip.pack(side="left", padx=(0, 4), pady=2)
-            chip.bind("<Button-1>", lambda _e, t=text: self.apply_label(t))
+        self.tags_box = tk.Frame(wrap, bg=BG)
+        self.tags_box.pack(fill="x")
+        self._render_chips()
 
-        entry_row = tk.Frame(wrap, bg="#1f2430")
+        entry_row = tk.Frame(wrap, bg=BG)
         entry_row.pack(fill="x", pady=(4, 0))
-        self.tag_entry = tk.Entry(entry_row, bg="#2b3242", fg="#e6e9f0", bd=0,
-                                  insertbackground="#e6e9f0", font=("Segoe UI", 9))
+        self.tag_entry = tk.Entry(entry_row, bg=CHIP_BG, fg=FG, bd=0,
+                                  insertbackground=FG, font=("Segoe UI", 9))
         self.tag_entry.pack(side="left", fill="x", expand=True, ipady=3)
         self.tag_entry.bind("<Return>", lambda _e: self.apply_label())
 
-        foot = tk.Frame(wrap, bg="#1f2430")
+        foot = tk.Frame(wrap, bg=BG)
         foot.pack(fill="x", pady=(8, 0))
         tk.Checkbutton(foot, text="结束后自动上传", variable=self.auto_upload,
-                       fg="#8b93a7", bg="#1f2430", selectcolor="#2b3242",
-                       activebackground="#1f2430", activeforeground="#fff",
+                       fg=MUTED, bg=BG, selectcolor=CHIP_BG,
+                       activebackground=BG, activeforeground="#fff",
                        font=("Segoe UI", 9), bd=0).pack(side="left")
         self.btn_upload = self._button(foot, "上传", self.upload, "#6366f1", small=True)
         self.btn_upload.pack(side="right")
 
-        tk.Label(wrap, textvariable=self.status, fg="#8b93a7", bg="#1f2430",
+        tk.Label(wrap, textvariable=self.status, fg=MUTED, bg=BG,
                  font=("Segoe UI", 8), anchor="w").pack(fill="x", pady=(6, 0))
 
-        # 拖动（按住空白处）
-        for widget in (self.root, wrap):
-            widget.bind("<Button-1>", self._start_drag)
-            widget.bind("<B1-Motion>", self._on_drag)
-        self.root.bind("<Escape>", lambda _e: self.quit())
-        self._refresh_buttons()
-        self._tick()
+        self._bind_drag(wrap)          # 空白处拖动
+
+    def _render_chips(self):
+        """按当前标签池渲染快捷 chip（标签可能被用户在设置页改动，需可重绘）。"""
+        if not hasattr(self, "tags_box"):
+            return
+        for child in self.tags_box.winfo_children():
+            child.destroy()
+        shown = self.labels[:6]
+        for text in shown:
+            chip = tk.Label(self.tags_box, text=text, fg="#c7d2fe", bg=CHIP_BG,
+                            padx=6, pady=2, cursor="hand2", font=("Segoe UI", 9))
+            chip.pack(side="left", padx=(0, 4), pady=2)
+            chip.bind("<Button-1>", lambda _e, t=text: self.apply_label(t))
+        if not shown:
+            tk.Label(self.tags_box, text="（类别池是空的，可在设置页添加）", fg=MUTED,
+                     bg=BG, font=("Segoe UI", 8)).pack(side="left")
+
+    def _apply_view(self, name: str):
+        """切换形态：只显示当前那个，并让窗口按内容自动收缩。"""
+        if name not in VIEWS:
+            name = "ball"
+        for key, frame in self.frames.items():
+            if key != name:
+                frame.pack_forget()
+        self.frames[name].pack()
+        self.root.geometry("")            # 先清空，再按内容自适应
+        self.view.set(name)
+
+    def _on_ball_click(self):
+        self._apply_view("bar")
+
+    def _on_escape(self):
+        """Esc 逐级退回：完整 → 长条 → 小球 → 退出。"""
+        current = self.view.get()
+        if current == "full":
+            self._apply_view("bar")
+        elif current == "bar":
+            self._apply_view("ball")
+        else:
+            self.quit()
 
     def _button(self, parent, text, command, color, small=False):
         return tk.Button(parent, text=text, command=command, bd=0, bg=color, fg="white",
@@ -187,13 +321,38 @@ class FocusTimer:
                          font=("Segoe UI", 9 if small else 10, "bold"),
                          padx=8 if small else 12, pady=2 if small else 5)
 
-    def _start_drag(self, event):
+    # ---------- 拖动 / 点击区分 ----------
+
+    def _bind_drag(self, widget, click=None):
+        """按住可拖动窗口；没移动就算一次点击（click 回调）。"""
+        widget.bind("<ButtonPress-1>", self._press)
+        widget.bind("<B1-Motion>", self._on_drag)
+        if click is not None:
+            widget.bind("<ButtonRelease-1>", lambda _e, cb=click: self._release(cb))
+        else:
+            widget.bind("<ButtonRelease-1>", self._release)
+
+    def _press(self, event):
+        self._moved = False
         self._drag = (event.x_root - self.root.winfo_x(),
                       event.y_root - self.root.winfo_y())
+        self._press_at = (event.x_root, event.y_root)
 
     def _on_drag(self, event):
+        if not self._drag:
+            return
+        if self._press_at and (abs(event.x_root - self._press_at[0]) > 3
+                               or abs(event.y_root - self._press_at[1]) > 3):
+            self._moved = True
         dx, dy = self._drag
         self.root.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
+
+    def _release(self, click=None):
+        if click is not None and not self._moved:
+            click()
+        self._drag = None
+        self._press_at = None
+        self._moved = False
 
 
     # ---------- 交互 ----------
@@ -279,7 +438,10 @@ class FocusTimer:
                 btn.pack(side="left", padx=3)
             else:
                 btn.pack_forget()
-        self.dot.configure(fg={"running": "#10b981", "paused": "#f59e0b"}.get(state, "#4b5563"))
+        color = {"running": "#10b981", "paused": "#f59e0b"}.get(state, "#4b5563")
+        self.dot.configure(fg=color)
+        self.bar_dot.configure(fg=color)
+        self.ball.itemconfigure(self._ring_dot, fill=color)
         can_upload = state in ("paused", "stopped") and not (self.session or {}).get("entry_id")
         self.btn_upload.configure(state="normal" if can_upload else "disabled")
 
@@ -287,8 +449,8 @@ class FocusTimer:
         """本地每秒自增（不依赖网络）；与服务端对齐由各动作的返回完成。"""
         if (self.session or {}).get("state") == "running":
             self.elapsed += 1
-        total = max(0, int(self.elapsed))
-        self.time_var.set(f"{total // 3600:02d}:{total % 3600 // 60:02d}:{total % 60:02d}")
+        self.time_var.set(fmt_clock(self.elapsed))
+        self.ball.itemconfigure(self._ring_text, text=fmt_short(self.elapsed))
         self.root.after(POLL_MS, self._tick)
 
     def run(self):
@@ -299,14 +461,16 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="PointLog 专注计时器（桌面悬浮窗）")
     parser.add_argument("--base-url", default=DEFAULT_BASE, help="PointLog 服务地址")
     parser.add_argument("--points", type=float, default=1, help="上传时使用的点数（默认 1）")
+    parser.add_argument("--view", default="ball", choices=VIEWS,
+                        help="启动时的形态（默认 ball 小球）")
     parser.add_argument("--list-labels", action="store_true", help="只打印当前档案的类别池")
     parser.add_argument("--wait", type=float, default=15.0,
                         help="启动时等待服务就绪的秒数（0＝不等待）")
     args = parser.parse_args(argv)
 
-    labels = DEFAULT_LABELS
+    labels = []
     ok, data = http_json(f"{args.base_url.rstrip('/')}/api/tags/diary")
-    if ok and data.get("tags"):
+    if ok and isinstance(data.get("tags"), list):
         labels = data["tags"]
 
     if args.list_labels:
@@ -318,7 +482,8 @@ def main(argv=None) -> int:
         if lock is None:                       # 已有悬浮窗在跑：静默退出，不叠窗口
             print("PointLog 专注计时器已在运行（如需重开，请先关掉旧窗口）。")
             return 0
-        FocusTimer(args.base_url, args.points, labels, wait_sec=args.wait).run()
+        FocusTimer(args.base_url, args.points, labels,
+                   wait_sec=args.wait, view=args.view).run()
         lock.close()
     except tk.TclError as exc:                 # 无图形环境
         print(f"无法创建窗口（{exc}）。请在桌面环境运行，或用 --list-labels 查看标签。")

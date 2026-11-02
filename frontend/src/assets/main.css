@@ -701,6 +701,18 @@ button.ghost.tiny { padding: 2px 8px; font-size: 12px; }
 }
 .routine-reminder.expired {
   border-left-color: var(--danger); background: #fef2f2; color: var(--danger);
+
+/* ---- 标签池：改名态（v2.9） ---- */
+.tag-chip.editing { border-style: dashed; border-color: var(--accent); padding-right: 4px; }
+.tag-rename-input {
+  width: 92px; margin: 0; padding: 1px 4px; font-size: 12px;
+  border: 1px solid var(--border); border-radius: 4px;
+}
+.tag-edit { border: 0; background: transparent; cursor: pointer; color: var(--muted);
+  font-size: 11px; padding: 0 2px; }
+.tag-edit:hover { color: var(--accent); }
+.tag-tip { font-size: 12px; margin: 8px 0 0; }
+
 }
 .rem-text { flex: 1; }
 .rem-when { font-size: 12px; white-space: nowrap; }

@@ -194,27 +194,104 @@ class InstanceLockTest(unittest.TestCase):
 
 
 class TimerWindowTest(unittest.TestCase):
-    """悬浮窗能否真正构造出来（回归：StringVar 必须先有 root）。"""
+    """悬浮窗三种形态能否真正构造与切换（回归：StringVar 必须先有 root）。"""
 
-    def test_window_builds(self):
+    def _make(self, view="ball"):
         try:
             import tkinter as tk
         except ImportError:
             self.skipTest("无 tkinter")
         try:
             from focus_timer import FocusTimer
-            timer = FocusTimer("http://127.0.0.1:9", points=1, labels=["a"], wait_sec=0)
+            return FocusTimer("http://127.0.0.1:9", points=1, labels=["画画"],
+                              wait_sec=0, view=view), tk
         except tk.TclError as exc:
             self.skipTest(f"无图形环境：{exc}")
 
+    def test_window_builds_in_ball_view(self):
+        timer, _ = self._make()
         try:
             timer.root.update_idletasks()
+            self.assertEqual(timer.view.get(), "ball")
             self.assertEqual(timer.time_var.get(), "00:00:00")
             self.assertEqual(timer.label_var.get(), "未选标签")
             self.assertEqual(str(timer.root.attributes("-topmost")), "1")
-            self.assertEqual(len(timer.labels), 1)
         finally:
             timer.root.destroy()
+
+    def test_switch_ball_bar_full(self):
+        timer, _ = self._make()
+        try:
+            timer._apply_view("bar")
+            self.assertEqual(timer.view.get(), "bar")
+            timer._apply_view("full")
+            self.assertEqual(timer.view.get(), "full")
+            timer._apply_view("ball")
+            self.assertEqual(timer.view.get(), "ball")
+        finally:
+            timer.root.destroy()
+
+    def test_escape_steps_back_one_level(self):
+        timer, _ = self._make(view="full")
+        try:
+            timer._on_escape()
+            self.assertEqual(timer.view.get(), "bar")
+            timer._on_escape()
+            self.assertEqual(timer.view.get(), "ball")
+        finally:
+            timer.root.destroy()
+
+    def test_ball_click_expands_to_bar(self):
+        timer, _ = self._make(view="ball")
+        try:
+            timer._on_ball_click()
+            self.assertEqual(timer.view.get(), "bar")
+        finally:
+            timer.root.destroy()
+
+    def test_empty_label_pool_shows_hint(self):
+        timer, _ = self._make(view="full")
+        try:
+            timer.labels = []
+            timer._render_chips()
+            timer.root.update_idletasks()
+            texts = [w.cget("text") for w in timer.tags_box.winfo_children()]
+            self.assertEqual(len(texts), 1)
+            self.assertIn("类别池是空的", texts[0])
+        finally:
+            timer.root.destroy()
+
+    def test_drag_does_not_trigger_switch(self):
+        """按住拖动超过 3px 就标记为"移动过"，松手不切换形态。"""
+        timer, _ = self._make(view="ball")
+        try:
+            class Ev:
+                x_root = 100
+                y_root = 100
+            timer._press(Ev())
+            Ev.x_root, Ev.y_root = 140, 140
+            timer._on_drag(Ev())
+            self.assertTrue(timer._moved)
+            switched = []
+            timer._release(lambda: switched.append(True))
+            self.assertEqual(switched, [])          # 没有触发点击
+            self.assertEqual(timer.view.get(), "ball")
+        finally:
+            timer.root.destroy()
+
+
+class FormatHelperTest(unittest.TestCase):
+    def test_fmt_clock(self):
+        from focus_timer import fmt_clock
+        self.assertEqual(fmt_clock(0), "00:00:00")
+        self.assertEqual(fmt_clock(3725), "01:02:05")
+
+    def test_fmt_short(self):
+        from focus_timer import fmt_short
+        self.assertEqual(fmt_short(0), "0m")
+        self.assertEqual(fmt_short(5400), "1h30m")
+        self.assertEqual(fmt_short(600), "10m")
+
 
 
 if __name__ == "__main__":
