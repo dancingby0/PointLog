@@ -674,21 +674,26 @@ button.ghost.tiny { padding: 2px 8px; font-size: 12px; }
 @media (max-width: 720px) { .act-rule-row { grid-template-columns: 1fr 1fr; } }
 
 
-/* ---- 每日日常 + 备忘时间（v2.7） ---- */
-.routine-list, .routine-reminders { list-style: none; margin: 0; padding: 0; }
-.routine-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+/* ---- 每日日常 / 点数标准（两段独立文本，v2.7） ---- */
+.textblock-view {
+  white-space: pre-wrap;          /* 保留用户换行与缩进 */
+  word-break: break-word;
+  margin: 0;
+  line-height: 1.7;
+  font-size: 14px;
 }
-.routine-item:last-child { border-bottom: 0; }
-.routine-time { color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.routine-text { flex: 1; }
-.routine-note { font-size: 12px; }
-.routine-days { font-size: 12px; white-space: nowrap; }
-.routine-points { font-weight: 700; color: var(--accent); white-space: nowrap; }
-.routine-ops { display: flex; gap: 4px; }
-.routine-sub { margin-top: 14px; }
-.routine-sub h3 { font-size: 14px; margin: 0; }
+.textblock-input {
+  width: 100%;
+  min-height: 150px;
+  margin: 0 0 10px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+  resize: vertical;
+}
+
+/* ---- 今日提醒（备忘时间命中） ---- */
+.routine-reminders { list-style: none; margin: 0; padding: 0; }
 .routine-reminder {
   display: flex; align-items: baseline; gap: 10px; padding: 6px 0 6px 10px;
   border-left: 3px solid #f59e0b; margin-bottom: 6px; background: #fffbeb;
@@ -700,14 +705,6 @@ button.ghost.tiny { padding: 2px 8px; font-size: 12px; }
 .rem-text { flex: 1; }
 .rem-when { font-size: 12px; white-space: nowrap; }
 .routine-reminder.expired .rem-when { color: var(--danger); }
-.routine-edit { border: 1px dashed var(--border); border-radius: 10px; padding: 12px; margin-top: 10px; }
-.routine-edit-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-.routine-edit-row label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.routine-edit-row label.grow { flex: 1; min-width: 180px; }
-.routine-edit-row label.grow input { flex: 1; margin: 0; }
-.routine-edit-row label.inline { color: var(--text); }
-.routine-edit-row input[type="time"], .routine-edit-row input[type="number"] { width: auto; margin: 0; padding: 4px 8px; }
-.routine-edit-row button.tiny.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 /* 备忘：时间范围编辑器 + 过期标红 */
 .memo-when { font-size: 12px; color: var(--muted); white-space: nowrap; }

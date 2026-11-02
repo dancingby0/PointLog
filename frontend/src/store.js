@@ -54,11 +54,10 @@ export const state = reactive({
   memoSchedule: { mode: "none", ranges: [], monthdays: [] },
   memoEditingId: null,     // 正在编辑时间范围的备忘 id
   memoEditDraft: null,     // 该备忘的编辑草稿 {text, schedule}
-  // 每日日常 + 点数规定（v2.7，档案级）
-  routines: [],            // 全部日常项（含停用的）
-  schedule: null,          // 当前所选日的日常 + 备忘提醒
-  routineEditingId: null,  // 正在编辑的日常 id（"new" 表示新增）
-  routineDraft: null,
+  // 每日日常 / 点数标准（v2.7，两段独立文本）+ 今日提醒
+  dailyRoutine: { text: "", lines: 0, chars: 0, empty: true },
+  pointRules: { text: "", lines: 0, chars: 0, empty: true },
+  todayView: null,         // 某天的展示内容（两段文本 + 当天生效的备忘提醒）
   mainGoal: "",
   goalDraft: "",
   goalEditing: false,
@@ -95,6 +94,13 @@ export function selectedLabel() {
 }
 
 export const selectedIsToday = () => state.selectedDay === todayStr();
+
+// 所选日的简短标签（"今天"/"昨天"/"10-09"），供标题行用
+export function selectedDayLabel() {
+  if (!state.selectedDay) return "";
+  const label = selectedLabel();
+  return label || state.selectedDay;
+}
 
 export function lineText() {
   if (!state.line || state.line.active_days === 0) return "—";
@@ -320,10 +326,9 @@ export function resetForProfileChange() {
   state.memoSchedule = blankSchedule();
   state.memoEditingId = null;
   state.memoEditDraft = null;
-  state.routines = [];
-  state.schedule = null;
-  state.routineEditingId = null;
-  state.routineDraft = null;
+  state.dailyRoutine = { text: "", lines: 0, chars: 0, empty: true };
+  state.pointRules = { text: "", lines: 0, chars: 0, empty: true };
+  state.todayView = null;
   state.activityStatus = null;
   state.activityDay = null;
   state.activityDays = [];
@@ -485,7 +490,6 @@ export async function loadAll() {
     await loadDays();
     await loadCalendar();
     await loadMemos();
-    await loadRoutines();
     await loadLine();
     const target = state.days.find((d) => d.is_today) || state.days[0];
     await selectDay(target ? target.date : todayStr());
@@ -514,7 +518,7 @@ export async function selectDay(day) {
   state.selectedDay = day;
   await loadEntries();
   await loadNote();
-  await loadSchedule(day);
+  await loadTodayView(day);
 }
 
 export async function loadDays() {
@@ -860,98 +864,81 @@ export function cellTitle(c) {
   return c.points > 0 ? `${c.date} · ${c.points} 点` : c.date;
 }
 
-// ================= 每日日常 + 点数规定（v2.7） =================
+// ================= 每日日常 / 点数标准 / 今日提醒（v2.7，三者独立） =================
 
 export function blankSchedule() {
-  return { mode: "none", ranges: [], monthdays: [] };
+  return { mode: "none", ranges: [], monthdays: [], weekdays: [] };
 }
 
 export function resetMemoSchedule() {
   state.memoSchedule = blankSchedule();
 }
 
-export function blankRoutine() {
-  return { start: "08:00", end: "09:00", text: "", points: 1, days: [], enabled: true, note: "" };
+// 两段独立文本：dailyRoutine（每日日常） / pointRules（点数标准）
+const TEXT_ENDPOINTS = { dailyRoutine: "/api/daily-routine", pointRules: "/api/point-rules" };
+
+function emptyBlock() {
+  return { text: "", lines: 0, chars: 0, empty: true };
 }
 
-export async function loadRoutines() {
+export async function loadTextBlock(field) {
+  const url = TEXT_ENDPOINTS[field];
+  if (!url) return null;
   try {
-    const res = await fetch("/api/routines");
+    const res = await fetch(url);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "加载日常失败");
-    state.routines = data.routines;
+    if (!res.ok) throw new Error(data.error || "加载失败");
+    state[field] = data;
+    return data;
   } catch (err) {
     console.error(err);
-    state.routines = [];
+    state[field] = emptyBlock();
+    return null;
   }
 }
 
-export async function loadSchedule(day = state.selectedDay) {
-  const target = day || "";
+export async function saveTextBlock(field, text) {
+  const url = TEXT_ENDPOINTS[field];
+  if (!url) throw new Error("未知字段");
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "保存失败");
+  state[field] = data;
+  return data;
+}
+
+// 某天的展示内容：两段文本 + 当天生效的备忘提醒
+export async function loadTodayView(day = state.selectedDay) {
   try {
-    const q = target ? `?day=${target}` : "";
-    const res = await fetch(`/api/schedule${q}`);
+    const q = day ? `?day=${day}` : "";
+    const res = await fetch(`/api/today-view${q}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "加载日常失败");
-    state.schedule = data;
+    if (!res.ok) throw new Error(data.error || "加载失败");
+    state.todayView = data;
+    state.dailyRoutine = data.daily_routine;
+    state.pointRules = data.point_rules;
   } catch (err) {
     console.error(err);
-    state.schedule = null;
+    state.todayView = null;
   }
 }
 
-export function startRoutineEdit(item = null) {
-  state.routineEditingId = item ? item.id : "new";
-  state.routineDraft = item
-    ? { start: item.start, end: item.end, text: item.text, points: item.points,
-        days: [...(item.days || [])], enabled: item.enabled !== false, note: item.note || "" }
-    : blankRoutine();
-}
 
-export function cancelRoutineEdit() {
-  state.routineEditingId = null;
-  state.routineDraft = null;
-}
-
-export function toggleRoutineDay(weekday) {
-  if (!state.routineDraft) return;
-  const days = state.routineDraft.days;
-  const i = days.indexOf(weekday);
-  if (i === -1) days.push(weekday); else days.splice(i, 1);
-  state.routineDraft.days = [...days].sort((a, b) => a - b);
-}
-
-export async function saveRoutine() {
-  const draft = state.routineDraft;
-  if (!draft) return;
-  const editing = state.routineEditingId;
+// 备忘变动后只刷新"今日提醒"部分（不动两段文本，避免覆盖用户正在编辑的草稿）
+export async function refreshReminders() {
   try {
-    const url = editing === "new" ? "/api/routines" : `/api/routines/${editing}`;
-    const res = await fetch(url, {
-      method: editing === "new" ? "POST" : "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(draft),
-    });
+    const day = state.selectedDay || "";
+    const q = day ? `?day=${day}` : "";
+    const res = await fetch(`/api/today-view${q}`);
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "保存失败");
-    await loadRoutines();
-    await loadSchedule();
-    cancelRoutineEdit();
+    if (!res.ok) throw new Error(data.error || "加载失败");
+    state.todayView = data;
   } catch (err) {
-    alert("保存日常失败：" + err.message);
-  }
-}
-
-export async function delRoutine(id) {
-  if (!confirm("删除这条日常？")) return;
-  try {
-    const res = await fetch(`/api/routines/${id}`, { method: "DELETE" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "删除失败");
-    await loadRoutines();
-    await loadSchedule();
-  } catch (err) {
-    alert("删除失败：" + err.message);
+    console.error(err);
   }
 }
 
@@ -984,7 +971,7 @@ export async function addMemo() {
     state.memos.push(data);
     state.memoDraft = "";
     resetMemoSchedule();
-    await loadSchedule();
+    await refreshReminders();
   } catch (err) {
     alert("添加失败：" + err.message);
   }
@@ -1001,7 +988,7 @@ export async function updateMemo(id, patch) {
     if (!res.ok) throw new Error(data.error || "保存失败");
     const i = state.memos.findIndex((m) => m.id === id);
     if (i !== -1) state.memos[i] = data;
-    await loadSchedule();
+    await refreshReminders();
     return data;
   } catch (err) {
     alert("保存失败：" + err.message);
@@ -1015,7 +1002,7 @@ export async function delMemo(id) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "删除失败");
     state.memos = state.memos.filter((m) => m.id !== id);
-    await loadSchedule();
+    await refreshReminders();
   } catch (err) {
     alert("删除失败：" + err.message);
   }

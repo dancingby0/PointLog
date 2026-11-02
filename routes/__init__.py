@@ -13,7 +13,7 @@
 - routes/statistics.py 统计 API（坚持与概况等）
 - routes/accounts.py  本地账号 API（v2.3）
 - routes/activity.py  活动数据 API（v2.6，从本机 ActivityWatch 拉取桌面活动）
-- routes/schedule.py  每日日常 + 点数规定 API（v2.7，档案级）
+- routes/schedule.py  每日日常 + 点数标准 API（v2.7，档案级，两段独立文本）
 """
 
 from . import (

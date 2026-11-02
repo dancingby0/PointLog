@@ -1,12 +1,15 @@
-"""每日日常 + 点数规定 API（v2.7，档案级）。
+"""每日日常 + 点数标准 API（v2.7，档案级，两个独立功能）。
 
-日常只是"今天该干什么 + 建议点数"的清单，**不会自动生成打卡记录**（否则会污染点数线与打卡天数）。
+- ``daily_routine``：一段可换行文字 —— 每天大概怎么过（不精确到时段、不绑点数）
+- ``point_rules``：另一段可换行文字 —— 什么事算多少点的标准
 
-- ``GET  /api/schedule?day=YYYY-MM-DD``  某天的日常 + 当日生效的备忘提醒（默认今天）
-- ``GET  /api/routines``                 全部日常项（编辑用，含停用的）
-- ``POST /api/routines``                 新增一项
-- ``PUT  /api/routines/<id>``            修改一项
-- ``DELETE /api/routines/<id>``          删除一项
+端点：
+
+- ``GET /api/daily-routine`` / ``PUT``  读写每日日常文本
+- ``GET /api/point-rules``  / ``PUT``  读写点数标准文本
+- ``GET /api/today-view?day=``        某天要展示的内容（两段文本 + 当天生效的备忘提醒）
+
+两者互不影响：改一个不会动另一个；都只是文本，不产生打卡记录。
 """
 
 import datetime as dt
@@ -16,89 +19,79 @@ from flask import Blueprint, jsonify, request
 import config
 import data
 import routine
+import textblock
 import utils
 
 bp = Blueprint("schedule", __name__, url_prefix="/api")
 
-MAX_ROUTINES = 100
+FIELDS = {"daily-routine": "daily_routine", "point-rules": "point_rules"}
 
 
 def _today() -> dt.date:
     return utils.date_of(dt.datetime.now().astimezone())
 
 
-def _load():
+def _payload(field: str, text: str) -> dict:
+    stats = textblock.text_stats(text)
+    return {"text": text, "lines": stats["lines"], "chars": stats["chars"],
+            "empty": stats["empty"]}
+
+
+def _read(field: str):
     d = data.load(config.CURRENT_PROFILE)
-    d.setdefault("routines", [])
-    return d
+    return _payload(FIELDS[field], textblock.normalize_text(d.get(FIELDS[field])))
 
 
-@bp.get("/schedule")
-def get_schedule():
-    """某天的日常 + 备忘提醒；未指定 day 用今天。"""
+def _write(field: str):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or "text" not in body:
+        return jsonify({"error": "请求体应为 {text: 多行文本}"}), 400
+    text = textblock.normalize_text(body.get("text"))
+    d = data.load(config.CURRENT_PROFILE)
+    d[FIELDS[field]] = text
+    data.save(config.CURRENT_PROFILE, d)
+    return jsonify(_payload(field, text))
+
+
+@bp.get("/daily-routine")
+def get_daily_routine():
+    return jsonify(_read("daily-routine"))
+
+
+@bp.put("/daily-routine")
+def put_daily_routine():
+    return _write("daily-routine")
+
+
+@bp.get("/point-rules")
+def get_point_rules():
+    return jsonify(_read("point-rules"))
+
+
+@bp.put("/point-rules")
+def put_point_rules():
+    return _write("point-rules")
+
+
+@bp.get("/today-view")
+def today_view():
+    """某天要展示的内容：每日日常 + 点数标准 + 当天生效的备忘提醒（默认今天）。"""
     raw_day = request.args.get("day")
     try:
         day = dt.date.fromisoformat(raw_day) if raw_day else _today()
     except ValueError:
         return jsonify({"error": "day 格式应为 YYYY-MM-DD"}), 400
 
-    d = _load()
-    view = routine.day_schedule(d.get("routines") or [], d.get("memos") or [], day, _today())
-    return jsonify(view)
-
-
-@bp.get("/routines")
-def list_routines():
-    d = _load()
-    items = []
-    for raw in d["routines"]:
-        try:
-            items.append(routine.normalize_routine_item(raw))
-        except ValueError:
-            continue
-    items.sort(key=lambda x: (x["start"], x["end"], x["text"]))
-    return jsonify({"routines": items})
-
-
-@bp.post("/routines")
-def create_routine():
-    d = _load()
-    if len(d["routines"]) >= MAX_ROUTINES:
-        return jsonify({"error": f"日常最多 {MAX_ROUTINES} 条"}), 400
-    try:
-        item = routine.normalize_routine_item(request.get_json(silent=True) or {})
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    item["id"] = data.new_id()
-    d["routines"].append(item)
-    data.save(config.CURRENT_PROFILE, d)
-    return jsonify(item), 201
-
-
-@bp.put("/routines/<routine_id>")
-def update_routine(routine_id: str):
-    d = _load()
-    target = next((r for r in d["routines"] if str(r.get("id")) == routine_id), None)
-    if target is None:
-        return jsonify({"error": "日常不存在"}), 404
-    body = request.get_json(silent=True) or {}
-    merged = {**target, **body}
-    merged["id"] = routine_id
-    try:
-        item = routine.normalize_routine_item(merged)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    target.update(item)
-    data.save(config.CURRENT_PROFILE, d)
-    return jsonify(item)
-
-
-@bp.delete("/routines/<routine_id>")
-def delete_routine(routine_id: str):
-    d = _load()
-    before = len(d["routines"])
-    d["routines"] = [r for r in d["routines"] if str(r.get("id")) != routine_id]
-    if len(d["routines"]) == before:
-        return jsonify({"error": "日常不存在"}), 404
-    data.save(config.CURRENT_PROFILE, d)
-    return jsonify({"ok": True})
+    d = data.load(config.CURRENT_PROFILE)
+    today = _today()
+    reminders = routine.day_reminders(d.get("memos") or [], day, today)
+    return jsonify({
+        "day": day.isoformat(),
+        "weekday": day.weekday(),
+        "weekday_label": routine.WEEKDAY_LABELS[day.weekday()],
+        "daily_routine": _payload("daily-routine",
+                                  textblock.normalize_text(d.get("daily_routine"))),
+        "point_rules": _payload("point-rules",
+                                textblock.normalize_text(d.get("point_rules"))),
+        "reminders": reminders,
+    })

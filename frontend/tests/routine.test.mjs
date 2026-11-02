@@ -1,34 +1,25 @@
-// v2.7 备忘时间范围 + 日常筛选的纯逻辑单测
+// 每日日常 / 点数标准文本展示的纯逻辑单测（前端不重复实现后端规则，只测展示函数）
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-// 前端不重复实现范围判断（后端 routine.py 负责），这里验证展示相关的纯函数
-function dayText(days) {
-  const labels = ["一", "二", "三", "四", "五", "六", "日"];
-  if (!days || days.length === 0 || days.length === 7) return "每天";
-  return "周" + days.map((d) => labels[d]).join("、");
+// 与 TextBlockCard 中"共 N 行 / M 字"的算法一致（后端也返回同样口径）
+function textStats(text) {
+  const clean = String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = clean.split("\n").filter((l) => l.trim());
+  return { lines: lines.length, chars: clean.replace(/\n/g, "").length };
 }
 
-function ptText(points) {
-  const n = Number(points) || 0;
-  return n ? `${n} 点` : "—";
-}
-
-test("dayText：未选星期 = 每天", () => {
-  assert.equal(dayText([]), "每天");
-  assert.equal(dayText(null), "每天");
-  assert.equal(dayText([0, 1, 2, 3, 4, 5, 6]), "每天");
+test("textStats：多行文本的行数与字数", () => {
+  assert.deepEqual(textStats("第一行\n第二行"), { lines: 2, chars: 6 });
+  assert.deepEqual(textStats("abc\ndef\n\n"), { lines: 2, chars: 6 });
 });
 
-test("dayText：部分星期逐个列出", () => {
-  assert.equal(dayText([0]), "周一");
-  assert.equal(dayText([0, 2, 4]), "周一、三、五");
-  assert.equal(dayText([6]), "周日");
+test("textStats：空文本 / 纯空白", () => {
+  assert.deepEqual(textStats(""), { lines: 0, chars: 0 });
+  assert.deepEqual(textStats("   \n\n  "), { lines: 0, chars: 5 });   // 只有空格与换行，无有效行
+  assert.deepEqual(textStats(null), { lines: 0, chars: 0 });
 });
 
-test("ptText：0 点显示破折号，其余带单位", () => {
-  assert.equal(ptText(0), "—");
-  assert.equal(ptText(null), "—");
-  assert.equal(ptText(2), "2 点");
-  assert.equal(ptText("1.5"), "1.5 点");
+test("textStats：CRLF 归一后行数正确", () => {
+  assert.deepEqual(textStats("a\r\nb\r\nc"), { lines: 3, chars: 3 });
 });

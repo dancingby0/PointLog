@@ -75,7 +75,9 @@ def default_data() -> dict:
         "memos": [],         # 备忘录：[{ "id": str, "text": str, "schedule": {...} }]
         "main_goal": "",     # 置顶主目标（v1 仅展示用）
         "diary_tags": [],    # 日记标签池（档案级）：快捷填词库，存文本
-        "routines": [],      # 每日日常 + 点数规定（v2.7，档案级）：[{id,start,end,text,points,days,enabled}]
+        # v2.7：两段纯文本，各自独立（不互相依赖）
+        "daily_routine": "",  # 每日日常（多行文字；显示在点数线下方）
+        "point_rules": "",    # 点数标准（多行文字；显示在每日日常下方）
     }
 
 
@@ -144,6 +146,9 @@ def load(profile: str) -> dict:
     base = default_data()
     for key in base:
         data.setdefault(key, base[key])
+    # 清理：v2.7 早期把"每日日常"做成日常项清单（routines），已改为纯文本，
+    # 旧字段留着只会让 data.json 变脏；读时丢弃，下次保存即自然消失。
+    data.pop("routines", None)
     # 迁移：早期版本的 daily_notes 是数组占位，现改为 {日期: 文本} 字典
     if not isinstance(data["daily_notes"], dict):
         data["daily_notes"] = {}
