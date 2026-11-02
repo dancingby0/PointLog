@@ -171,5 +171,51 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(focus.fmt_duration(600), "10m")
 
 
+class InstanceLockTest(unittest.TestCase):
+    """单实例锁：第二个实例应拿不到锁（避免叠出多个悬浮窗）。"""
+
+    def test_second_acquire_fails(self):
+        import socket
+
+        from focus_timer import acquire_instance_lock, SINGLE_INSTANCE_PORT
+        first = acquire_instance_lock()
+        if first is None:
+            self.skipTest(f"端口 {SINGLE_INSTANCE_PORT} 已被占用（可能已有计时器在跑）")
+        try:
+            self.assertIsNone(acquire_instance_lock())      # 第二个拿不到
+        finally:
+            first.close()
+        # 释放后又能拿到
+        again = acquire_instance_lock()
+        self.assertIsNotNone(again)
+        again.close()
+        with socket.socket() as probe:                      # 确认端口已释放
+            probe.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+
+
+class TimerWindowTest(unittest.TestCase):
+    """悬浮窗能否真正构造出来（回归：StringVar 必须先有 root）。"""
+
+    def test_window_builds(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            self.skipTest("无 tkinter")
+        try:
+            from focus_timer import FocusTimer
+            timer = FocusTimer("http://127.0.0.1:9", points=1, labels=["a"], wait_sec=0)
+        except tk.TclError as exc:
+            self.skipTest(f"无图形环境：{exc}")
+
+        try:
+            timer.root.update_idletasks()
+            self.assertEqual(timer.time_var.get(), "00:00:00")
+            self.assertEqual(timer.label_var.get(), "未选标签")
+            self.assertEqual(str(timer.root.attributes("-topmost")), "1")
+            self.assertEqual(len(timer.labels), 1)
+        finally:
+            timer.root.destroy()
+
+
 if __name__ == "__main__":
     unittest.main()

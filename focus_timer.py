@@ -20,6 +20,7 @@
 
 import argparse
 import json
+import time
 import tkinter as tk
 import urllib.error
 import urllib.request
@@ -29,6 +30,25 @@ from urllib.parse import quote
 DEFAULT_BASE = "http://127.0.0.1:5000"
 POLL_MS = 1000
 DEFAULT_LABELS = ["画画", "学习日语", "学习英语", "学数学", "科研工作"]
+SINGLE_INSTANCE_PORT = 5091        # 单实例锁：本地回环端口，被占用＝已有计时器在跑
+
+
+def acquire_instance_lock():
+    """单实例锁：返回持有中的 socket（保持绑定直到进程退出），已被占用则返回 None。
+
+    用"绑定本地回环端口"而不是锁文件：进程被杀/崩溃后由系统自动释放，
+    不会留下残留锁导致"再也起不来"。
+    """
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", SINGLE_INSTANCE_PORT))
+    except OSError:
+        sock.close()
+        return None
+    return sock                      # 故意不 close：出了作用域也由进程生命周期决定
+
 
 
 def http_json(url: str, method: str = "GET", body=None, timeout: float = 5.0):
@@ -58,7 +78,8 @@ def http_json(url: str, method: str = "GET", body=None, timeout: float = 5.0):
 class FocusTimer:
     """悬浮计时器：界面 + 状态机（与服务端会话保持一致）。"""
 
-    def __init__(self, base_url: str, points: float = 1, labels=None):
+    def __init__(self, base_url: str, points: float = 1, labels=None,
+                 wait_sec: float = 15.0):
         self.base = base_url.rstrip("/")
         self.points = points
         self.labels = list(labels or DEFAULT_LABELS)
@@ -67,21 +88,38 @@ class FocusTimer:
         self.label = ""
         self._drag = (0, 0)
         self._build_ui()
+        if wait_sec > 0 and not self._server_ready(wait_sec):
+            self.status.set("等不到 PointLog 服务；仍可计时，上传会失败")
+
+    # ---------- 服务探活 ----------
+
+    def _server_ready(self, timeout: float) -> bool:
+        """launcher 会同时拉起本窗口，服务可能就差几百毫秒：先等一会儿再报"连不上"。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            ok, _ = http_json(f"{self.base}/api/focus/current", timeout=1.0)
+            if ok:
+                return True
+            time.sleep(0.4)
+        return False
+
 
     # ---------- 界面 ----------
 
     def _build_ui(self):
-        self.status = tk.StringVar(value="就绪")
-        self.time_var = tk.StringVar(value="00:00:00")
-        self.label_var = tk.StringVar(value="未选标签")
-        self.auto_upload = tk.BooleanVar(value=False)
-
         self.root = tk.Tk()
         self.root.title("PointLog 专注计时")
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)                 # 无边框，更像悬浮窗
         self.root.configure(bg="#1f2430")
         self.root.geometry("+80+80")
+
+        # 注意：StringVar/BooleanVar 必须先有 root（tkinter 需要默认根窗口），
+        # 否则会抛 "Too early to create variable: no default root window"。
+        self.status = tk.StringVar(value="就绪")
+        self.time_var = tk.StringVar(value="00:00:00")
+        self.label_var = tk.StringVar(value="未选标签")
+        self.auto_upload = tk.BooleanVar(value=False)
 
         wrap = tk.Frame(self.root, bg="#1f2430", padx=12, pady=8)
         wrap.pack()
@@ -262,6 +300,8 @@ def main(argv=None) -> int:
     parser.add_argument("--base-url", default=DEFAULT_BASE, help="PointLog 服务地址")
     parser.add_argument("--points", type=float, default=1, help="上传时使用的点数（默认 1）")
     parser.add_argument("--list-labels", action="store_true", help="只打印当前档案的类别池")
+    parser.add_argument("--wait", type=float, default=15.0,
+                        help="启动时等待服务就绪的秒数（0＝不等待）")
     args = parser.parse_args(argv)
 
     labels = DEFAULT_LABELS
@@ -274,7 +314,12 @@ def main(argv=None) -> int:
         return 0
 
     try:
-        FocusTimer(args.base_url, args.points, labels).run()
+        lock = acquire_instance_lock()
+        if lock is None:                       # 已有悬浮窗在跑：静默退出，不叠窗口
+            print("PointLog 专注计时器已在运行（如需重开，请先关掉旧窗口）。")
+            return 0
+        FocusTimer(args.base_url, args.points, labels, wait_sec=args.wait).run()
+        lock.close()
     except tk.TclError as exc:                 # 无图形环境
         print(f"无法创建窗口（{exc}）。请在桌面环境运行，或用 --list-labels 查看标签。")
         return 1

@@ -26,6 +26,7 @@ import config
 import data
 import focus
 import utils
+from routes import accounts
 
 bp = Blueprint("focus", __name__, url_prefix="/api/focus")
 
@@ -37,6 +38,8 @@ def _now() -> dt.datetime:
 
 
 def _load():
+    # 桌面计时器可能先于浏览器发请求：先补做自动登录，避免写进 default 档案
+    accounts.ensure_auto_login()
     d = data.load(config.CURRENT_PROFILE)
     d.setdefault("focus_sessions", [])
     return d

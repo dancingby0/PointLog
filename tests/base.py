@@ -42,6 +42,11 @@ class ApiTestCase(unittest.TestCase):
         # 导出目录也隔离：测试不往真实 exports/ 落文件
         config.EXPORTS_DIR = Path(self._tmp.name) / "exports"
         self._old_profile = config.CURRENT_PROFILE
+        # 账号也要隔离：focus 等接口会触发自动登录，若不隔离会读到真实账号配置
+        self._old_account = config.CURRENT_ACCOUNT
+        self._old_suppressed = config.AUTO_LOGIN_SUPPRESSED
+        config.CURRENT_ACCOUNT = ""
+        config.AUTO_LOGIN_SUPPRESSED = True      # 默认不自动登录，避免读挂到真实账号
         # 随机档案名：彻底避免跨测试共享任何档案状态
         self.profile = f"api_{uuid.uuid4().hex[:8]}"
         config.CURRENT_PROFILE = self.profile
@@ -50,6 +55,8 @@ class ApiTestCase(unittest.TestCase):
         data.DATA_DIR = self._old_dir
         config.EXPORTS_DIR = self._old_exports_dir
         config.CURRENT_PROFILE = self._old_profile
+        config.CURRENT_ACCOUNT = self._old_account
+        config.AUTO_LOGIN_SUPPRESSED = self._old_suppressed
         try:
             self._tmp.cleanup()
         except Exception:  # noqa: BLE001  (忽略清理期异常，避免掩盖测试结果)

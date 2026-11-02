@@ -1,6 +1,7 @@
 @echo off
-REM PointLog 专注计时器（桌面悬浮窗）
-REM 首次使用：直接双击即可；服务需先在跑（start.bat 或 .venv\Scripts\python app.py）
+rem PointLog 专注计时器（桌面悬浮窗）
+rem 一般不需要单独运行：start.bat 会自动拉起它。
+rem 如果服务已经在跑，想再开/重开一个悬浮窗，双击本文件即可。
 setlocal
 cd /d "%~dp0"
 if exist ".venv\Scripts\pythonw.exe" (
@@ -9,3 +10,4 @@ if exist ".venv\Scripts\pythonw.exe" (
   start "" pythonw focus_timer.py %*
 )
 endlocal
+

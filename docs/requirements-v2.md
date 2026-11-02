@@ -524,8 +524,19 @@ python transfer_entries.py --from <源档案> --to <目标档案> [--account <�
   也可自己输入（≤40 字）。
 - **上传开关**：底部「结束后自动上传」默认**关闭**；也可手动点「上传」。
 - 启动：`python focus_timer.py`（或双击 `start_focus.bat`，用 pythonw 无控制台运行）；
-  参数 `--base-url`、`--points`、`--list-labels`。
+  参数 `--base-url`、`--points`、`--list-labels`、`--wait`（等服务的秒数）。
 - 容错：服务没开也能正计时（本地每秒自增），开始/暂停等动作会提示"连不上 PointLog"。
+- **单实例**：用绑定本地回环端口（5091）做锁，重复启动只保留一个悬浮窗；
+  进程被杀后端口自动释放，不留残锁。
+
+### 15.2.1 与一键启动集成（start.bat / launcher.py）
+- `start.bat` → `launcher.py`，launcher 在服务就绪后**自动拉起**悬浮计时器：
+  用轮询端口（而非固定 sleep）确认就绪，再用 `CREATE_NEW_PROCESS_GROUP` 起独立进程，
+  于是"关掉控制台窗口"只停服务、不会带走计时器；
+- 参数：`start.bat --no-timer` 恢复旧行为（只起服务+浏览器）；
+- 自动登录时序：计时器可能**先于浏览器**发请求，所以把自动登录判断抽成
+  `routes.accounts.ensure_auto_login()`，`/api/focus/*` 等入口拿不到账号时会补做一次
+  （幂等，且不改变"用户主动登出后不再自动登录"的语义），避免数据落进 `default` 档案。
 
 ### 15.3 数据与口径
 - 存 `data.json` 的 `focus_sessions`（档案级），一条会话：
@@ -568,4 +579,7 @@ python transfer_entries.py --from <源档案> --to <目标档案> [--account <�
 - [x] 今日/累计时长、累计天数、按标签分布在页面实时可见
 - [x] 上传后的记录出现在当日打卡列表并计入点数（`day_points`）
 - [x] 计时器本地每秒自增，服务不可用不影响计时（只影响上传）
+- [x] `start.bat` 一键同时拉起服务 + 浏览器 + 悬浮计时器；`--no-timer` 可退回旧行为
+- [x] 重复启动计时器只保留一个窗口（单实例锁），进程被杀后不留残锁
+- [x] 计时器先于浏览器请求时也能正确自动登录，不会写进 `default` 档案（有单测兜底）
 

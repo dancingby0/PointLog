@@ -36,6 +36,31 @@ def _is_unlocked(name: str) -> bool:
     return config.UNLOCKED_ACCOUNT == name and time.time() < config.UNLOCKED_UNTIL
 
 
+def ensure_auto_login() -> str:
+    """服务启动后首次需要账号时补做自动登录（幂等）。
+
+    为什么需要：自动登录原先只在 ``GET /api/auth``（浏览器打开页面）时才触发。
+    但桌面计时器 / 导入脚本等客户端可能**先于浏览器**发请求，那时 CURRENT_ACCOUNT 为空、
+    CURRENT_PROFILE 还是 "default"，数据就会写进 default 档案。这里把同一套判断抽出来，
+    任何入口在拿不到当前账号时都可以调用它（不改变"用户主动登出后不再自动登录"的语义）。
+
+    返回自动登录后的账号名（未登录返回空串）。
+    """
+    if config.CURRENT_ACCOUNT or config.AUTO_LOGIN_SUPPRESSED:
+        return config.CURRENT_ACCOUNT
+    meta = data.load_accounts_meta()
+    remembered = meta.get("current")
+    if not (meta.get("auto_login") and remembered and remembered in meta.get("accounts", [])):
+        return ""
+    # 有 PIN 的账号：仅当处于免输窗口内才自动登录
+    if _has_account_pin(remembered) and not _is_unlocked(remembered):
+        return ""
+    config.CURRENT_ACCOUNT = remembered
+    profs = data.account_profile_dirs(remembered)
+    config.CURRENT_PROFILE = profs[0] if profs else "default"
+    return config.CURRENT_ACCOUNT
+
+
 @bp.get("")
 def list_accounts_api():
     """账号列表 + 当前选中 + 自动登录标记。
@@ -44,16 +69,7 @@ def list_accounts_api():
     记忆账号有 PIN 时不做自动登录（前端会引导输入 PIN）。
     """
     meta = data.load_accounts_meta()
-    # 自动登录逻辑：仅当"进程内未登录"且"用户本进程内未主动登出过"时触发（即：服务刚启动）
-    if (not config.CURRENT_ACCOUNT and not config.AUTO_LOGIN_SUPPRESSED
-            and meta.get("auto_login") and meta.get("current")):
-        remembered = meta["current"]
-        if remembered in meta["accounts"]:
-            # 有 PIN 的账号：仅当处于免输窗口内才自动登录
-            if not _has_account_pin(remembered) or _is_unlocked(remembered):
-                config.CURRENT_ACCOUNT = remembered
-                profs = data.account_profile_dirs(remembered)
-                config.CURRENT_PROFILE = profs[0] if profs else "default"
+    ensure_auto_login()
 
     accounts = data.list_accounts()
     unlocked = config.UNLOCKED_ACCOUNT if time.time() < config.UNLOCKED_UNTIL else ""
