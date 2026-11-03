@@ -37,6 +37,9 @@ from urllib.parse import quote
 DEFAULT_BASE = "http://127.0.0.1:5000"
 POLL_MS = 1000
 SINGLE_INSTANCE_PORT = 5091        # 单实例锁：本地回环端口，被占用＝已有计时器在跑
+SNAP_PX = 28                       # 拖到离屏幕边缘这么近就吸附
+DRAG_THRESHOLD = 3                 # 位移超过这么多像素算拖动（不算点击）
+DEFAULT_AUTO_SYNC_MIN = 15         # 默认自动同步间隔（分钟），0＝关闭
 
 
 class ApiResult(dict):
@@ -152,7 +155,8 @@ class FocusTimer:
     """悬浮计时器：界面 + 状态机（与服务端会话保持一致）。"""
 
     def __init__(self, base_url: str, points: float = 1, labels=None,
-                 wait_sec: float = 15.0, view: str = "ball"):
+                 wait_sec: float = 15.0, view: str = "ball",
+                 auto_sync_min: float = DEFAULT_AUTO_SYNC_MIN):
         self.base = base_url.rstrip("/")
         self.points = points
         self.labels = list(labels or [])
@@ -162,11 +166,19 @@ class FocusTimer:
         self._drag = None
         self._press_at = None
         self._moved = False
+        self._anchor = ("right", "bottom")     # 贴边方向：决定展开时往哪边长
+        self.auto_sync_min = float(auto_sync_min or 0)
+        self._next_sync = time.time() + self.auto_sync_min * 60 if self.auto_sync_min else 0
         self._build_ui(view or "ball")
-        if wait_sec > 0 and not self._server_ready(wait_sec):
-            self.status.set("等不到 PointLog 服务；仍可计时，上传会失败")
-        else:
+        if wait_sec is not None and wait_sec > 0 and not self._server_ready(wait_sec):
+            self.status.set("等不到 PointLog 服务；仍可计时，稍后会自动重试同步")
+        elif wait_sec is not None:
+            # 服务在：拉一次标签池，并把上次没传完的会话补传（短超时，失败不影响启动）
             self._sync_labels()
+            if self.auto_sync_min:
+                self._auto_sync(quiet=True)
+        # wait_sec=None：明确"不联网"（测试用，避免对不可用地址等超时）
+
 
     # ---------- 服务 ----------
 
@@ -187,7 +199,6 @@ class FocusTimer:
             self.labels = list(data["tags"])
             self._render_chips()
 
-
     # ---------- 界面 ----------
 
     def _build_ui(self, view: str):
@@ -203,7 +214,7 @@ class FocusTimer:
         self.status = tk.StringVar(value="就绪")
         self.time_var = tk.StringVar(value="00:00:00")
         self.label_var = tk.StringVar(value="未选标签")
-        self.auto_upload = tk.BooleanVar(value=False)
+        self.auto_upload = tk.BooleanVar(value=True)      # 默认开启：结束后自动上传
         self.view = tk.StringVar(value="ball")
 
         self.frames = {}
@@ -213,6 +224,7 @@ class FocusTimer:
 
         self.root.bind("<Escape>", lambda _e: self._on_escape())
         self._apply_view(view)
+        self.place_bottom_right()          # 默认停在屏幕右下角
         self._refresh_buttons()
         self._tick()
 
@@ -306,8 +318,12 @@ class FocusTimer:
         self.btn_upload = self._button(foot, "上传", self.upload, "#6366f1", small=True)
         self.btn_upload.pack(side="right")
 
+        sync_text = (f"自动同步：每 {self.auto_sync_min:g} 分钟"
+                     if self.auto_sync_min else "自动同步：已关闭")
+        tk.Label(wrap, text=sync_text, fg=MUTED, bg=BG,
+                 font=("Segoe UI", 8), anchor="w").pack(fill="x", pady=(4, 0))
         tk.Label(wrap, textvariable=self.status, fg=MUTED, bg=BG,
-                 font=("Segoe UI", 8), anchor="w").pack(fill="x", pady=(6, 0))
+                 font=("Segoe UI", 8), anchor="w").pack(fill="x", pady=(2, 0))
 
         self._bind_drag(wrap)          # 空白处拖动
 
@@ -328,15 +344,75 @@ class FocusTimer:
                      bg=BG, font=("Segoe UI", 8)).pack(side="left")
 
     def _apply_view(self, name: str):
-        """切换形态：只显示当前那个，并让窗口按内容自动收缩。"""
+        """切换形态：只显示当前那个，并沿"贴边方向"展开（默认右下 → 向左上）。
+
+        关键：记住切换前后的宽高，把贴住的那条边钉住，这样窗口不会"跳"到别处。
+        """
         if name not in VIEWS:
             name = "ball"
+        old_x, old_y = self.root.winfo_x(), self.root.winfo_y()
+        old_w, old_h = self.root.winfo_width(), self.root.winfo_height()
+
         for key, frame in self.frames.items():
             if key != name:
                 frame.pack_forget()
         self.frames[name].pack()
-        self.root.geometry("")            # 先清空，再按内容自适应
+        self.root.update_idletasks()
+
+        w = self.root.winfo_reqwidth()
+        h = self.root.winfo_reqheight()
+        side_v, side_h = self._anchor
+
+        x = old_x
+        if side_v == "right":                 # 贴右边 → 向左长
+            x = old_x + old_w - w if old_w > 1 else x
+        y = old_y
+        if side_h == "bottom":                # 贴底边 → 向上长
+            y = old_y + old_h - h if old_h > 1 else y
+
+        self.root.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
         self.view.set(name)
+
+    # ---------- 屏幕贴边 ----------
+
+    def _screen(self) -> tuple[int, int]:
+        return self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+
+    def place_bottom_right(self, margin: int = 16):
+        """初始位置：屏幕右下角（贴边；底部留一点余量避开任务栏/托盘）。"""
+        self.root.update_idletasks()
+        w, h = self.root.winfo_reqwidth(), self.root.winfo_reqheight()
+        sw, sh = self._screen()
+        # 任务栏通常 40~48px、有些机器在右侧；这里用 56px 余量，既贴边又不被遮住
+        x = max(0, sw - w - margin)
+        y = max(0, sh - h - 56)
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+        self._anchor = ("right", "bottom")
+
+    def _snap_to_edges(self):
+        """松手后：靠近哪条边就贴上去，并记下贴边方向（决定之后往哪边展开）。"""
+        self.root.update_idletasks()
+        w, h = self.root.winfo_width(), self.root.winfo_height()
+        sw, sh = self._screen()
+        x, y = self.root.winfo_x(), self.root.winfo_y()
+
+        side_v = "right" if (sw - (x + w)) <= max(SNAP_PX, sw - x - w) else "left"
+        side_h = "bottom" if (sh - (y + h)) <= max(SNAP_PX, sh - y - h) else "top"
+
+        nx, ny = x, y
+        if (sw - (x + w)) <= SNAP_PX:          # 贴右
+            nx, side_v = sw - w, "right"
+        elif x <= SNAP_PX:                     # 贴左
+            nx, side_v = 0, "left"
+        if (sh - (y + h)) <= SNAP_PX:          # 贴下
+            ny, side_h = sh - h, "bottom"
+        elif y <= SNAP_PX:                     # 贴上
+            ny, side_h = 0, "top"
+
+        nx = max(0, min(nx, sw - w))
+        ny = max(0, min(ny, sh - h))
+        self.root.geometry(f"{w}x{h}+{nx}+{ny}")
+        self._anchor = (side_v, side_h)
 
     def _on_ball_click(self):
         self._apply_view("bar")
@@ -384,11 +460,42 @@ class FocusTimer:
         self.root.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
 
     def _release(self, click=None):
-        if click is not None and not self._moved:
+        moved = self._moved
+        if click is not None and not moved:
             click()
+        elif moved:
+            self._snap_to_edges()          # 拖动结束 → 靠近边缘就吸附
         self._drag = None
         self._press_at = None
         self._moved = False
+
+    # ---------- 自动同步 ----------
+
+    def _auto_sync(self, quiet: bool = False):
+        """把所有"已结束且未上传"的会话批量上传到点数系统（服务端幂等）。"""
+        ok, data = http_json(f"{self.base}/api/focus/sync", "POST",
+                             {"points": self.points}, timeout=3.0)
+        if not ok:
+            if not quiet:
+                self.status.set(f"自动同步失败：{data.get('error')}")
+            return 0
+        count = int(data.get("count") or 0)
+        if count:
+            self.status.set(f"已自动同步 {count} 条专注记录到点数系统")
+            self._refresh_buttons()
+        elif not quiet:
+            self.status.set("自动同步：没有待同步的记录")
+        return count
+
+    def _maybe_auto_sync(self):
+        """按设定的间隔触发自动同步（在 _tick 里每秒检查）。"""
+        if not self.auto_sync_min:
+            return                              # 0＝关闭
+        now = time.time()
+        if self._next_sync and now < self._next_sync:
+            return
+        self._next_sync = now + self.auto_sync_min * 60   # 先重排，避免失败时每秒重试
+        self._auto_sync()
 
 
     # ---------- 交互 ----------
@@ -404,11 +511,8 @@ class FocusTimer:
         ok, data = http_json(f"{self.base}/api/focus/sessions", "POST",
                              {"label": label, "points": self.points})
         if not ok:
-            if data.get("need_login"):
-                self.status.set("需要先登录：请在浏览器里打开 PointLog 并登录账号")
-                self._apply_view("full")          # 展开窗口，避免提示被藏在小球里
-            else:
-                self.status.set(f"开始失败：{data.get('error')}")
+            self.status.set(f"开始失败：{data.get('error')}")
+            self._apply_view("full")          # 展开窗口，避免提示被藏在小球里
             return
         self.session = data
         self.elapsed = 0
@@ -424,7 +528,7 @@ class FocusTimer:
     def stop(self):
         self._act("stop", "已结束")
         if self.auto_upload.get():
-            self.upload()
+            self._auto_sync()          # 结束即同步（覆盖所有待同步会话，不止这一条）
 
     def _act(self, action, hint):
         if not self.session:
@@ -491,6 +595,7 @@ class FocusTimer:
             self.elapsed += 1
         self.time_var.set(fmt_clock(self.elapsed))
         self.ball.itemconfigure(self._ring_text, text=fmt_short(self.elapsed))
+        self._maybe_auto_sync()
         self.root.after(POLL_MS, self._tick)
 
     def run(self):
@@ -506,6 +611,9 @@ def main(argv=None) -> int:
     parser.add_argument("--list-labels", action="store_true", help="只打印当前档案的类别池")
     parser.add_argument("--wait", type=float, default=15.0,
                         help="启动时等待服务就绪的秒数（0＝不等待）")
+    parser.add_argument("--auto-sync", type=float, default=DEFAULT_AUTO_SYNC_MIN,
+                        metavar="MIN", help=f"每隔多少分钟自动同步到点数系统"
+                                            f"（默认 {DEFAULT_AUTO_SYNC_MIN}，0＝关闭）")
     args = parser.parse_args(argv)
 
     labels = []
@@ -523,7 +631,8 @@ def main(argv=None) -> int:
             print("PointLog 专注计时器已在运行（如需重开，请先关掉旧窗口）。")
             return 0
         FocusTimer(args.base_url, args.points, labels,
-                   wait_sec=args.wait, view=args.view).run()
+                   wait_sec=args.wait, view=args.view,
+                   auto_sync_min=args.auto_sync).run()
         lock.close()
     except tk.TclError as exc:                 # 无图形环境
         print(f"无法创建窗口（{exc}）。请在桌面环境运行，或用 --list-labels 查看标签。")

@@ -72,18 +72,19 @@ class EnsureAutoLoginTest(ApiTestCase):
             config.UNLOCKED_ACCOUNT = ""
             config.UNLOCKED_UNTIL = 0.0
 
-    def test_focus_api_triggers_auto_login(self):
-        """计时器先请求 /api/focus/* → 也会补做自动登录，不写进 default 档案。"""
+    def test_focus_no_longer_requires_login(self):
+        """v2.9 起专注数据存账号级 focus.json：不需要登录也能计时。
+
+        这正是"无需 PIN"的落点——账号名从 accounts.json 取，PIN 保护的是浏览器界面，
+        不是本地文件。
+        """
         config.CURRENT_PROFILE = "default"
         res = self.client.post("/api/focus/sessions", json={"label": "x"})
         self.assertEqual(res.status_code, 201)
-        self.assertEqual(config.CURRENT_ACCOUNT, "tester")
-        # 会话落在 tester 账号下的某个档案里，而不是根 data/default
-        sess_file = data.profile_dir(config.CURRENT_PROFILE) / "data.json"
-        stored = data.load(config.CURRENT_PROFILE)
-        self.assertEqual(len(stored["focus_sessions"]), 1)
-        self.assertTrue(str(sess_file).replace("\\", "/").startswith(
-            str(data.account_dir("tester")).replace("\\", "/")))
+        # 数据落在账号级文件里（accounts.json 记住的账号），而不是档案 data.json
+        self.assertTrue(data.focus_path("tester").exists())
+        self.assertNotIn("focus_sessions",
+                         data.load(config.CURRENT_PROFILE))
 
 
 if __name__ == "__main__":

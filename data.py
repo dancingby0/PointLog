@@ -78,7 +78,7 @@ def default_data() -> dict:
         # v2.7：两段纯文本，各自独立（不互相依赖）
         "daily_routine": "",  # 每日日常（多行文字；显示在点数线下方）
         "point_rules": "",    # 点数标准（多行文字；显示在每日日常下方）
-        "focus_sessions": [],  # 专注会话（v2.8，计时器上传；结构见 focus.py）
+        # 注：专注会话（v2.9 起）存在账号级 focus.json，不再放档案里
     }
 
 
@@ -121,7 +121,7 @@ def save_settings(profile: str, settings: dict) -> None:
         json.dump(settings, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(path)
+    _atomic_replace(tmp, path)
 
 
 def data_path(profile: str) -> Path:
@@ -164,7 +164,7 @@ def save(profile: str, data: dict) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(path)
+    _atomic_replace(tmp, path)
 
 
 def new_id() -> str:
@@ -197,6 +197,19 @@ def load_path(path) -> dict:
     return raw
 
 
+def _atomic_replace(tmp: Path, path: Path, retries: int = 5) -> None:
+    """把 tmp 替换成 path；Windows 上偶尔会被杀毒/索引短暂占用，重试几次。"""
+    last = None
+    for attempt in range(retries):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError as exc:     # WinError 5：文件被短暂占用
+            last = exc
+            time.sleep(0.05 * (attempt + 1))
+    raise last
+
+
 def save_path(path, payload: dict) -> None:
     """按绝对路径原子写（先 .tmp 再替换）。"""
     path = Path(path)
@@ -206,7 +219,57 @@ def save_path(path, payload: dict) -> None:
         json.dump(payload, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(path)
+    _atomic_replace(tmp, path)
+
+
+# ---------- 专注会话：账号级（v2.9） ----------
+# 为什么放账号级而不是档案级：
+# 专注时长是"我在这台电脑上花了多久"的个人数据，与日记档案（写哪个本子）无关；
+# 更重要的是——档案由"当前账号 + 当前档案"的进程内状态决定，而账号有 PIN 时
+# 服务启动不会自动登录，桌面计时器就会找不到落点（曾导致写入看不见的 default 目录、
+# 上传 404）。账号级文件用 accounts.json 里记住的账号名定位，**不需要登录、不需要 PIN**。
+
+FOCUS_FILE = "focus.json"
+
+
+def focus_path(account: str = "") -> Path:
+    """专注数据文件：有账号 → data/<账号>/focus.json；无账号 → data/focus.json。"""
+    if account:
+        d = account_dir(account)
+    else:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        d = DATA_DIR
+    return d / FOCUS_FILE
+
+
+def default_focus() -> dict:
+    """全新的专注数据结构。"""
+    return {"version": 1, "sessions": []}
+
+
+def load_focus(account: str = "") -> dict:
+    """读取专注数据；缺失/损坏返回空结构。"""
+    path = focus_path(account)
+    base = default_focus()
+    if not path.exists():
+        return base
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return base
+    if not isinstance(raw, dict):
+        return base
+    for key in base:
+        raw.setdefault(key, copy.deepcopy(base[key]))
+    if not isinstance(raw.get("sessions"), list):
+        raw["sessions"] = []
+    return raw
+
+
+def save_focus(account: str, payload: dict) -> None:
+    """原子写 focus.json。"""
+    save_path(focus_path(account), payload)
 
 
 # ---------- 活动数据：档案级（v2.6，来自 ActivityWatch） ----------
@@ -271,7 +334,7 @@ def save_activity(profile: str, payload: dict) -> None:
         json.dump(payload, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(path)
+    _atomic_replace(tmp, path)
 
 
 # ---------- 资产数据：账号级（v2.3） ----------
@@ -324,7 +387,7 @@ def save_global(g: dict) -> None:
         json.dump(g, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(path)
+    _atomic_replace(tmp, path)
 # ---------- v2.3 本地账号层 ----------
 
 def validate_account_name(name: str) -> None:
@@ -368,7 +431,7 @@ def save_accounts_meta(meta: dict) -> None:
         json.dump(meta, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(path)
+    _atomic_replace(tmp, path)
 
 
 def account_dir(name: str) -> Path:
@@ -410,7 +473,7 @@ def save_account_settings(name: str, settings: dict) -> None:
         json.dump(settings, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(path)
+    _atomic_replace(tmp, path)
 
 
 def create_account(name: str) -> None:
@@ -471,7 +534,7 @@ def save_account_assets(account: str, g: dict) -> None:
         json.dump(g, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(path)
+    _atomic_replace(tmp, path)
 
 
 def rename_account(old_name: str, new_name: str) -> None:

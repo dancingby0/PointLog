@@ -64,18 +64,21 @@ class FocusSessionApiTest(ApiTestCase):
 
 class FocusUploadApiTest(ApiTestCase):
     def _make_session(self, minutes=30, label="学习日语", points=2):
-        """造一个已结束、时长确定的会话（直接写库，避免测试等待真实时间）。"""
+        """造一个已结束、时长确定的会话（直接写账号级 focus.json，避免等真实时间）。"""
+        account = "soloupload"
+        data.account_dir(account)
         start = dt.datetime.now().astimezone() - dt.timedelta(minutes=minutes)
         end = start + dt.timedelta(minutes=minutes)
-        d = data.load(config.CURRENT_PROFILE)
-        d.setdefault("focus_sessions", []).append({
+        data.save_focus(account, {"version": 1, "sessions": [{
             "id": "sess1", "label": label, "state": "stopped", "points": points,
             "segments": [{"start": start.isoformat(timespec="seconds"),
                           "end": end.isoformat(timespec="seconds")}],
             "created_at": start.isoformat(timespec="seconds"),
             "entry_id": None, "uploaded_at": None,
-        })
-        data.save(config.CURRENT_PROFILE, d)
+        }]})
+        config.CURRENT_ACCOUNT = account
+        config.CURRENT_PROFILE = self.profile        # 打卡记录写进当前档案
+        return account
 
     def test_upload_creates_entry(self):
         self._make_session(30, "学习日语", 2)
@@ -89,7 +92,8 @@ class FocusUploadApiTest(ApiTestCase):
         d = data.load(config.CURRENT_PROFILE)
         self.assertEqual(len(d["entries"]), 1)
         self.assertIn("学习日语", d["diary_tags"])          # 标签入池
-        self.assertEqual(d["focus_sessions"][0]["entry_id"], body["entry"]["id"])
+        stored = data.load_focus("soloupload")["sessions"][0]
+        self.assertEqual(stored["entry_id"], body["entry"]["id"])
 
     def test_upload_is_idempotent(self):
         self._make_session(30)
@@ -108,12 +112,18 @@ class FocusUploadApiTest(ApiTestCase):
         self.assertIn("1 分钟", res.get_json()["error"])
 
     def test_upload_pauses_running_session_first(self):
+        account = "solorun"
+        data.account_dir(account)
+        config.CURRENT_ACCOUNT = account
+        config.CURRENT_PROFILE = self.profile
         sid = self.client.post("/api/focus/sessions", json={"label": "x"}).get_json()["id"]
-        d = data.load(config.CURRENT_PROFILE)
-        past = (dt.datetime.now().astimezone() - dt.timedelta(minutes=5))
-        d["focus_sessions"][0]["segments"] = [
-            {"start": past.isoformat(timespec="seconds"), "end": None}]
-        data.save(config.CURRENT_PROFILE, d)
+        # 手动把开始时间挪到 5 分钟前，保证达到上传门槛
+        store = data.load_focus(account)
+        past = dt.datetime.now().astimezone() - dt.timedelta(minutes=5)
+        for s in store["sessions"]:
+            if str(s.get("id")) == sid:
+                s["segments"] = [{"start": past.isoformat(timespec="seconds"), "end": None}]
+        data.save_focus(account, store)
 
         res = self.client.post(f"/api/focus/sessions/{sid}/upload", json={})
         self.assertEqual(res.status_code, 200)
@@ -289,6 +299,135 @@ class FocusCrossProfileTest(ApiTestCase):
         self.assertEqual(self.client.delete(f"/api/focus/sessions/{sid}").status_code, 200)
         legacy = data.DATA_DIR / "default" / "data.json"
         self.assertEqual(data.load_path(legacy)["focus_sessions"], [])
+
+
+class FocusCrossProfileTest(ApiTestCase):
+    """v2.9：专注数据存账号级 focus.json —— 无需登录、不受档案影响。"""
+
+    def setUp(self):
+        super().setUp()
+        self._old_account = config.CURRENT_ACCOUNT
+        self._old_profile = config.CURRENT_PROFILE
+        data.account_dir("pinner")
+        meta = data.load_accounts_meta()
+        meta["accounts"] = ["pinner"]
+        meta["current"] = "pinner"
+        meta["auto_login"] = True
+        data.save_accounts_meta(meta)
+        data.save_account_settings("pinner", {"pin_hash": "x"})
+        # 未登录状态（账号有 PIN）：以前这会写进根 default，现在应落到账号级 focus.json
+        config.CURRENT_ACCOUNT = ""
+        config.CURRENT_PROFILE = "default"
+
+    def tearDown(self):
+        config.CURRENT_ACCOUNT = self._old_account
+        config.CURRENT_PROFILE = self._old_profile
+        super().tearDown()
+
+    def test_works_without_login_and_lands_in_account_file(self):
+        res = self.client.post("/api/focus/sessions", json={"label": "画画"})
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(res.get_json()["state"], "running")
+
+        focus_file = data.focus_path("pinner")
+        self.assertTrue(focus_file.exists())
+        self.assertEqual(len(data.load_focus("pinner")["sessions"]), 1)
+        # 不再写进无账号归属的根 default 档案
+        self.assertFalse((data.DATA_DIR / "default" / "data.json").exists())
+
+    def test_survives_profile_switch(self):
+        sid = self.client.post("/api/focus/sessions", json={"label": "画画"}).get_json()["id"]
+        # 登录并切到账号下的某个档案 → 会话依然在（账号级，不随档案漂移）
+        config.CURRENT_ACCOUNT = "pinner"
+        config.CURRENT_PROFILE = "painted"
+        data.profile_dir("painted")
+        self.assertEqual(self.client.post(f"/api/focus/sessions/{sid}/stop").status_code, 200)
+        self.assertEqual(self.client.get("/api/focus/stats").get_json()["sessions"], 1)
+
+    def test_legacy_profile_sessions_are_migrated_once(self):
+        """早期存在档案 data.json 里的 focus_sessions 会被并进账号级并清空旧字段。"""
+        profile_file = data.account_dir("pinner") / "old" / "data.json"
+        now = dt.datetime.now().astimezone()
+        start = now - dt.timedelta(minutes=30)
+        data.save_path(profile_file, {**data.default_data(), "focus_sessions": [{
+            "id": "legacy1", "label": "旧会话", "state": "stopped", "points": 1,
+            "segments": [{"start": start.isoformat(timespec="seconds"),
+                          "end": now.isoformat(timespec="seconds")}],
+            "created_at": start.isoformat(timespec="seconds"), "entry_id": None,
+        }]})
+
+        stats = self.client.get("/api/focus/stats").get_json()
+        self.assertEqual(stats["sessions"], 1)
+        self.assertEqual(stats["by_label"][0]["label"], "旧会话")
+        # 旧字段被清空（避免重复统计），账号级文件里有
+        self.assertEqual(data.load_path(profile_file)["focus_sessions"], [])
+        self.assertEqual(len(data.load_focus("pinner")["sessions"]), 1)
+        # 再读一次不会重复并入
+        self.assertEqual(self.client.get("/api/focus/stats").get_json()["sessions"], 1)
+
+
+class FocusAutoSyncTest(ApiTestCase):
+    """POST /api/focus/sync：批量上传"已结束且未上传"的会话（幂等）。"""
+
+    def _seed(self, account="solo"):
+        data.account_dir(account)
+        now = dt.datetime.now().astimezone()
+        rows = []
+        for idx, (label, minutes, state) in enumerate([
+            ("画画", 30, "stopped"),
+            ("学数学", 12, "paused"),
+            ("太短的", 0.2, "stopped"),          # 不足 1 分钟 → 跳过
+            ("运行中的", 20, "running"),          # 运行中 → 跳过
+        ]):
+            start = now - dt.timedelta(minutes=minutes + 5)
+            rows.append({
+                "id": f"s{idx}", "label": label, "state": state, "points": 1,
+                "segments": [{"start": start.isoformat(timespec="seconds"),
+                              "end": (start + dt.timedelta(minutes=minutes)).isoformat(
+                                  timespec="seconds")}],
+                "created_at": start.isoformat(timespec="seconds"), "entry_id": None,
+            })
+        data.save_focus(account, {"version": 1, "sessions": rows})
+        config.CURRENT_ACCOUNT = account
+        config.CURRENT_PROFILE = "p1"
+        data.profile_dir("p1")
+
+    def test_sync_uploads_only_eligible_sessions(self):
+        self._seed()
+        res = self.client.post("/api/focus/sync", json={})
+        self.assertEqual(res.status_code, 200)
+        body = res.get_json()
+        self.assertEqual(body["count"], 2)                     # 画画 + 学数学
+        labels = {u["label"] for u in body["uploaded"]}
+        self.assertEqual(labels, {"画画", "学数学"})
+        self.assertEqual(body["failed"], [])
+
+        entries = data.load("p1")["entries"]
+        self.assertEqual(len(entries), 2)
+        self.assertTrue(all("专注" in e["content"] for e in entries))
+
+    def test_sync_is_idempotent(self):
+        self._seed()
+        self.assertEqual(self.client.post("/api/focus/sync", json={}).get_json()["count"], 2)
+        second = self.client.post("/api/focus/sync", json={}).get_json()
+        self.assertEqual(second["count"], 0)                   # 已上传的不再重复
+        self.assertEqual(len(data.load("p1")["entries"]), 2)
+
+    def test_sync_respects_min_minutes(self):
+        self._seed()
+        body = self.client.post("/api/focus/sync", json={"min_minutes": 20}).get_json()
+        self.assertEqual(body["count"], 1)                     # 只有 30 分钟的画画
+        self.assertEqual(body["uploaded"][0]["label"], "画画")
+
+    def test_sync_overrides_points(self):
+        self._seed()
+        body = self.client.post("/api/focus/sync", json={"points": 3}).get_json()
+        self.assertTrue(all(u["points"] == 3 for u in body["uploaded"]))
+
+    def test_sync_rejects_bad_min_minutes(self):
+        self._seed()
+        self.assertEqual(self.client.post("/api/focus/sync",
+                                          json={"min_minutes": "abc"}).status_code, 400)
 
 
 if __name__ == "__main__":

@@ -204,7 +204,7 @@ class TimerWindowTest(unittest.TestCase):
         try:
             from focus_timer import FocusTimer
             return FocusTimer("http://127.0.0.1:9", points=1, labels=["画画"],
-                              wait_sec=0, view=view), tk
+                              wait_sec=None, view=view), tk
         except tk.TclError as exc:
             self.skipTest(f"无图形环境：{exc}")
 
@@ -276,6 +276,152 @@ class TimerWindowTest(unittest.TestCase):
             timer._release(lambda: switched.append(True))
             self.assertEqual(switched, [])          # 没有触发点击
             self.assertEqual(timer.view.get(), "ball")
+        finally:
+            timer.root.destroy()
+
+
+class WindowPlacementTest(unittest.TestCase):
+    """定位与贴边：默认右下、贴边吸附、展开时朝反方向长（右下 → 向左上）。"""
+
+    def _make(self, view="ball", auto_sync_min=0):
+        try:
+            import tkinter as tk
+        except ImportError:
+            self.skipTest("无 tkinter")
+        try:
+            from focus_timer import FocusTimer
+            return FocusTimer("http://127.0.0.1:9", points=1, labels=[], wait_sec=None,
+                              view=view, auto_sync_min=auto_sync_min), tk
+        except tk.TclError as exc:
+            self.skipTest(f"无图形环境：{exc}")
+
+    def test_default_position_is_bottom_right(self):
+        timer, _ = self._make()
+        try:
+            timer.root.update_idletasks()
+            sw, sh = timer._screen()
+            x, y = timer.root.winfo_x(), timer.root.winfo_y()
+            self.assertGreater(x, sw // 2, "应位于屏幕右半边")
+            self.assertGreater(y, sh // 2, "应位于屏幕下半边")
+            self.assertEqual(timer._anchor, ("right", "bottom"))
+        finally:
+            timer.root.destroy()
+
+    def test_expanding_keeps_right_edge(self):
+        """贴右下时展开：右边缘保持不动（相当于向左展开）。"""
+        timer, _ = self._make()
+        try:
+            timer.root.update_idletasks()
+            right_before = timer.root.winfo_x() + timer.root.winfo_width()
+            bottom_before = timer.root.winfo_y() + timer.root.winfo_height()
+
+            timer._apply_view("bar")
+            timer.root.update_idletasks()
+            self.assertEqual(timer.root.winfo_x() + timer.root.winfo_width(), right_before)
+            self.assertEqual(timer.root.winfo_y() + timer.root.winfo_height(), bottom_before)
+
+            timer._apply_view("full")
+            timer.root.update_idletasks()
+            self.assertEqual(timer.root.winfo_x() + timer.root.winfo_width(), right_before)
+        finally:
+            timer.root.destroy()
+
+    def test_snap_to_right_edge_records_anchor(self):
+        timer, _ = self._make()
+        try:
+            timer.root.update_idletasks()
+            sw, sh = timer._screen()
+            w, h = timer.root.winfo_width(), timer.root.winfo_height()
+            # 摆到离右边缘 5px 处 → 松手吸附到 0 距离
+            timer.root.geometry(f"{w}x{h}+{sw - w - 5}+{sh // 2}")
+            timer.root.update_idletasks()
+            timer._snap_to_edges()
+            timer.root.update_idletasks()
+            self.assertEqual(timer.root.winfo_x() + timer.root.winfo_width(), sw)
+            self.assertEqual(timer._anchor[0], "right")
+        finally:
+            timer.root.destroy()
+
+    def test_snap_to_left_edge_switches_anchor(self):
+        timer, _ = self._make()
+        try:
+            timer.root.update_idletasks()
+            sw, sh = timer._screen()
+            w, h = timer.root.winfo_width(), timer.root.winfo_height()
+            timer.root.geometry(f"{w}x{h}+3+{sh // 3}")
+            timer.root.update_idletasks()
+            timer._snap_to_edges()
+            timer.root.update_idletasks()
+            self.assertEqual(timer.root.winfo_x(), 0)
+            self.assertEqual(timer._anchor[0], "left")
+        finally:
+            timer.root.destroy()
+
+    def test_left_anchor_expands_rightward(self):
+        timer, _ = self._make()
+        try:
+            timer.root.update_idletasks()
+            sw, sh = timer._screen()
+            w, h = timer.root.winfo_width(), timer.root.winfo_height()
+            timer.root.geometry(f"{w}x{h}+0+{sh // 3}")
+            timer.root.update_idletasks()
+            timer._snap_to_edges()                 # → 贴左
+            left_before = timer.root.winfo_x()
+            timer._apply_view("bar")
+            timer.root.update_idletasks()
+            self.assertEqual(timer.root.winfo_x(), left_before)   # 左边缘不动 → 向右长
+        finally:
+            timer.root.destroy()
+
+
+class AutoSyncUiTest(unittest.TestCase):
+    """自动同步：间隔可配、默认开启、结束后自动上传开关默认打开。"""
+
+    def _make(self, auto_sync_min=15):
+        try:
+            import tkinter as tk
+        except ImportError:
+            self.skipTest("无 tkinter")
+        try:
+            from focus_timer import FocusTimer
+            return FocusTimer("http://127.0.0.1:9", points=1, labels=[], wait_sec=None,
+                              auto_sync_min=auto_sync_min), tk
+        except tk.TclError as exc:
+            self.skipTest(f"无图形环境：{exc}")
+
+    def test_auto_sync_interval_is_configured(self):
+        timer, _ = self._make(15)
+        try:
+            self.assertEqual(timer.auto_sync_min, 15)
+            self.assertGreater(timer._next_sync, 0)
+        finally:
+            timer.root.destroy()
+
+    def test_zero_disables_auto_sync(self):
+        timer, _ = self._make(0)
+        try:
+            self.assertEqual(timer.auto_sync_min, 0)
+            timer._maybe_auto_sync()               # 关掉时应该什么都不做
+            self.assertEqual(timer._next_sync, 0)
+        finally:
+            timer.root.destroy()
+
+    def test_auto_upload_checkbox_defaults_on(self):
+        timer, _ = self._make()
+        try:
+            self.assertTrue(timer.auto_upload.get())
+        finally:
+            timer.root.destroy()
+
+    def test_maybe_auto_sync_fires_when_due(self):
+        timer, _ = self._make(1)
+        calls = []
+        timer._auto_sync = lambda quiet=False: calls.append(quiet) or 0
+        try:
+            timer._next_sync = 0                   # 立即到期
+            timer._maybe_auto_sync()
+            self.assertEqual(calls, [False])
+            self.assertGreater(timer._next_sync, 0)   # 触发后重排下一次
         finally:
             timer.root.destroy()
 
